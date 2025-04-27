@@ -1,0 +1,24 @@
+[remap]
+
+importer="wav"
+type="AudioStreamWAV"
+uid="uid://ckdq6ek3fs7lc"
+path="res://.godot/imported/Slash3.wav-f54c919e1b208adcb018b7c0ecf6658c.sample"
+
+[deps]
+
+source_file="res://assets/Audio/Sounds/Whoosh & Slash/Slash3.wav"
+dest_files=["res://.godot/imported/Slash3.wav-f54c919e1b208adcb018b7c0ecf6658c.sample"]
+
+[params]
+
+force/8_bit=false
+force/mono=false
+force/max_rate=false
+force/max_rate_hz=44100
+edit/trim=false
+edit/normalize=false
+edit/loop_mode=0
+edit/loop_begin=0
+edit/loop_end=-1
+compress/mode=2
