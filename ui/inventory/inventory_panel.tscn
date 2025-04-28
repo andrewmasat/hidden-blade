@@ -1,0 +1,61 @@
+[gd_scene load_steps=4 format=3 uid="uid://cc141b611ya43"]
+
+[ext_resource type="Script" uid="uid://dc7gnmr31l35d" path="res://ui/inventory/inventory_panel.gd" id="1_smghy"]
+[ext_resource type="Texture2D" uid="uid://b8i2o4rd3lkxv" path="res://assets/Ui/Theme/Theme Wood/nine_path_panel_3.png" id="2_obcwt"]
+[ext_resource type="FontFile" uid="uid://kwrkbjiihpj5" path="res://assets/Ui/Font/NormalFont.ttf" id="3_4gfvs"]
+
+[node name="InventoryPanel" type="PanelContainer"]
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -175.0
+offset_top = -150.0
+offset_right = 175.0
+offset_bottom = 150.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_smghy")
+
+[node name="NinePatchRect" type="NinePatchRect" parent="."]
+layout_mode = 2
+texture = ExtResource("2_obcwt")
+patch_margin_left = 6
+patch_margin_top = 6
+patch_margin_right = 6
+patch_margin_bottom = 6
+
+[node name="MarginContainer" type="MarginContainer" parent="."]
+layout_mode = 2
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 10
+
+[node name="PanelLayout" type="VBoxContainer" parent="MarginContainer"]
+layout_mode = 2
+
+[node name="Label" type="Label" parent="MarginContainer/PanelLayout"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.607843, 0.317647, 0.235294, 1)
+theme_override_font_sizes/font_size = 16
+text = "Inventory"
+horizontal_alignment = 1
+
+[node name="HSeparator" type="HSeparator" parent="MarginContainer/PanelLayout"]
+layout_mode = 2
+
+[node name="InventoryGrid" type="GridContainer" parent="MarginContainer/PanelLayout"]
+layout_mode = 2
+columns = 8
+
+[node name="HSeparator2" type="HSeparator" parent="MarginContainer/PanelLayout"]
+layout_mode = 2
+
+[node name="CloseButton" type="Button" parent="MarginContainer/PanelLayout"]
+layout_mode = 2
+size_flags_horizontal = 4
+theme_override_fonts/font = ExtResource("3_4gfvs")
+theme_override_font_sizes/font_size = 12
+text = "Close"

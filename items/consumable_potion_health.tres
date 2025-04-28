@@ -1,0 +1,15 @@
+[gd_resource type="Resource" script_class="ItemData" load_steps=3 format=3 uid="uid://drlsha2k5ip0e"]
+
+[ext_resource type="Script" uid="uid://cd5h74w7bgd82" path="res://scripts/ItemData.gd" id="1_i5lj3"]
+[ext_resource type="Texture2D" uid="uid://cg001iwhtr2d" path="res://assets/Items/Potion/LifePot.png" id="2_3aub1"]
+
+[resource]
+script = ExtResource("1_i5lj3")
+item_id = "consumable_potion_health"
+quantity = 1
+max_stack_size = 10
+texture = ExtResource("2_3aub1")
+item_type = 1
+heal_amount = 10
+damage = 0.0
+metadata/_custom_type_script = "uid://cd5h74w7bgd82"

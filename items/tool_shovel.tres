@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="ItemData" load_steps=3 format=3 uid="uid://c7hec8o5g1bcd"]
+
+[ext_resource type="Script" uid="uid://cd5h74w7bgd82" path="res://scripts/ItemData.gd" id="1_qkdhf"]
+[ext_resource type="Texture2D" uid="uid://digyjgbe3irjh" path="res://assets/Items/Tool/Shovel.png" id="2_hh7q8"]
+
+[resource]
+script = ExtResource("1_qkdhf")
+item_id = "tool_shovel"
+quantity = 1
+max_stack_size = 1
+texture = ExtResource("2_hh7q8")
+item_type = 3
+metadata/_custom_type_script = "uid://cd5h74w7bgd82"

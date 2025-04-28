@@ -1,12 +1,14 @@
-[gd_scene load_steps=6 format=3 uid="uid://5jla8f64s8f"]
+[gd_scene load_steps=8 format=3 uid="uid://5jla8f64s8f"]
 
 [ext_resource type="Script" uid="uid://b56rv0tql5rd7" path="res://ui/hud.gd" id="1_1v5rv"]
 [ext_resource type="Texture2D" uid="uid://cd7nrnoa5d2g4" path="res://assets/Ui/Receptacle/LifeBarMiniUnder.png" id="1_en2x2"]
 [ext_resource type="Texture2D" uid="uid://dlapvfa2ithyt" path="res://assets/Ui/Receptacle/LifeBarMiniProgress.png" id="2_1v5rv"]
-[ext_resource type="FontFile" uid="uid://kwrkbjiihpj5" path="res://assets/Ui/Font/NormalFont.ttf" id="4_srpbi"]
+[ext_resource type="PackedScene" uid="uid://p5rcch5nsaa1" path="res://ui/inventory/inventory_slot.tscn" id="4_1v5rv"]
 [ext_resource type="Texture2D" uid="uid://d3ohffxbqnpdn" path="res://assets/Ui/Receptacle/Receptacle Sphere/Select.png" id="5_spcu4"]
+[ext_resource type="PackedScene" uid="uid://cc141b611ya43" path="res://ui/inventory/inventory_panel.tscn" id="6_1v5rv"]
+[ext_resource type="PackedScene" uid="uid://l1ltos0l2n54" path="res://ui/inventory/cursor_item_display.tscn" id="7_q43x7"]
 
-[node name="HUD" type="CanvasLayer"]
+[node name="HUD" type="CanvasLayer" groups=["HUD"]]
 script = ExtResource("1_1v5rv")
 
 [node name="UIContainer" type="Control" parent="."]
@@ -34,18 +36,18 @@ layout_mode = 2
 theme_override_constants/separation = 10
 
 [node name="HealthBar" type="TextureProgressBar" parent="UIContainer/MarginContainer/VBoxContainer"]
-custom_minimum_size = Vector2(200, 30)
+custom_minimum_size = Vector2(200, 20)
 layout_mode = 2
 size_flags_horizontal = 0
 size_flags_vertical = 0
 value = 100.0
 nine_patch_stretch = true
+stretch_margin_left = 2
+stretch_margin_top = 2
+stretch_margin_right = 2
+stretch_margin_bottom = 2
 texture_under = ExtResource("1_en2x2")
 texture_progress = ExtResource("2_1v5rv")
-
-[node name="DashChargesContainer" type="HBoxContainer" parent="UIContainer/MarginContainer/VBoxContainer"]
-layout_mode = 2
-theme_override_constants/separation = 10
 
 [node name="Spacer" type="Control" parent="UIContainer/MarginContainer/VBoxContainer"]
 layout_mode = 2
@@ -56,242 +58,40 @@ layout_mode = 2
 theme_override_constants/separation = 10
 alignment = 1
 
-[node name="SlotButton0" type="Button" parent="UIContainer/MarginContainer/VBoxContainer/HotbarContainer"]
-custom_minimum_size = Vector2(40, 40)
+[node name="HotbarSlot0" parent="UIContainer/MarginContainer/VBoxContainer/HotbarContainer" instance=ExtResource("4_1v5rv")]
 layout_mode = 2
 
-[node name="ItemIcon" type="TextureRect" parent="UIContainer/MarginContainer/VBoxContainer/HotbarContainer/SlotButton0"]
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-expand_mode = 1
-stretch_mode = 5
-
-[node name="QuantityLabel" type="Label" parent="UIContainer/MarginContainer/VBoxContainer/HotbarContainer/SlotButton0"]
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-theme_override_fonts/font = ExtResource("4_srpbi")
-theme_override_font_sizes/font_size = 14
-horizontal_alignment = 2
-vertical_alignment = 2
-
-[node name="SlotButton1" type="Button" parent="UIContainer/MarginContainer/VBoxContainer/HotbarContainer"]
-custom_minimum_size = Vector2(40, 40)
+[node name="HotbarSlot1" parent="UIContainer/MarginContainer/VBoxContainer/HotbarContainer" instance=ExtResource("4_1v5rv")]
 layout_mode = 2
 
-[node name="ItemIcon" type="TextureRect" parent="UIContainer/MarginContainer/VBoxContainer/HotbarContainer/SlotButton1"]
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-expand_mode = 1
-stretch_mode = 5
-
-[node name="QuantityLabel" type="Label" parent="UIContainer/MarginContainer/VBoxContainer/HotbarContainer/SlotButton1"]
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-theme_override_fonts/font = ExtResource("4_srpbi")
-theme_override_font_sizes/font_size = 14
-horizontal_alignment = 2
-vertical_alignment = 2
-
-[node name="SlotButton2" type="Button" parent="UIContainer/MarginContainer/VBoxContainer/HotbarContainer"]
-custom_minimum_size = Vector2(40, 40)
+[node name="HotbarSlot2" parent="UIContainer/MarginContainer/VBoxContainer/HotbarContainer" instance=ExtResource("4_1v5rv")]
 layout_mode = 2
 
-[node name="ItemIcon" type="TextureRect" parent="UIContainer/MarginContainer/VBoxContainer/HotbarContainer/SlotButton2"]
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-expand_mode = 1
-stretch_mode = 5
-
-[node name="QuantityLabel" type="Label" parent="UIContainer/MarginContainer/VBoxContainer/HotbarContainer/SlotButton2"]
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-theme_override_fonts/font = ExtResource("4_srpbi")
-theme_override_font_sizes/font_size = 14
-horizontal_alignment = 2
-vertical_alignment = 2
-
-[node name="SlotButton3" type="Button" parent="UIContainer/MarginContainer/VBoxContainer/HotbarContainer"]
-custom_minimum_size = Vector2(40, 40)
+[node name="HotbarSlot3" parent="UIContainer/MarginContainer/VBoxContainer/HotbarContainer" instance=ExtResource("4_1v5rv")]
 layout_mode = 2
 
-[node name="ItemIcon" type="TextureRect" parent="UIContainer/MarginContainer/VBoxContainer/HotbarContainer/SlotButton3"]
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-expand_mode = 1
-stretch_mode = 5
-
-[node name="QuantityLabel" type="Label" parent="UIContainer/MarginContainer/VBoxContainer/HotbarContainer/SlotButton3"]
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-theme_override_fonts/font = ExtResource("4_srpbi")
-theme_override_font_sizes/font_size = 14
-horizontal_alignment = 2
-vertical_alignment = 2
-
-[node name="SlotButton4" type="Button" parent="UIContainer/MarginContainer/VBoxContainer/HotbarContainer"]
-custom_minimum_size = Vector2(40, 40)
+[node name="HotbarSlot4" parent="UIContainer/MarginContainer/VBoxContainer/HotbarContainer" instance=ExtResource("4_1v5rv")]
 layout_mode = 2
 
-[node name="ItemIcon" type="TextureRect" parent="UIContainer/MarginContainer/VBoxContainer/HotbarContainer/SlotButton4"]
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-expand_mode = 1
-stretch_mode = 5
-
-[node name="QuantityLabel" type="Label" parent="UIContainer/MarginContainer/VBoxContainer/HotbarContainer/SlotButton4"]
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-theme_override_fonts/font = ExtResource("4_srpbi")
-theme_override_font_sizes/font_size = 14
-horizontal_alignment = 2
-vertical_alignment = 2
-
-[node name="SlotButton5" type="Button" parent="UIContainer/MarginContainer/VBoxContainer/HotbarContainer"]
-custom_minimum_size = Vector2(40, 40)
+[node name="HotbarSlot5" parent="UIContainer/MarginContainer/VBoxContainer/HotbarContainer" instance=ExtResource("4_1v5rv")]
 layout_mode = 2
 
-[node name="ItemIcon" type="TextureRect" parent="UIContainer/MarginContainer/VBoxContainer/HotbarContainer/SlotButton5"]
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-expand_mode = 1
-stretch_mode = 5
-
-[node name="QuantityLabel" type="Label" parent="UIContainer/MarginContainer/VBoxContainer/HotbarContainer/SlotButton5"]
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-theme_override_fonts/font = ExtResource("4_srpbi")
-theme_override_font_sizes/font_size = 14
-horizontal_alignment = 2
-vertical_alignment = 2
-
-[node name="SlotButton6" type="Button" parent="UIContainer/MarginContainer/VBoxContainer/HotbarContainer"]
-custom_minimum_size = Vector2(40, 40)
+[node name="HotbarSlot6" parent="UIContainer/MarginContainer/VBoxContainer/HotbarContainer" instance=ExtResource("4_1v5rv")]
 layout_mode = 2
 
-[node name="ItemIcon" type="TextureRect" parent="UIContainer/MarginContainer/VBoxContainer/HotbarContainer/SlotButton6"]
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-expand_mode = 1
-stretch_mode = 5
-
-[node name="QuantityLabel" type="Label" parent="UIContainer/MarginContainer/VBoxContainer/HotbarContainer/SlotButton6"]
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-theme_override_fonts/font = ExtResource("4_srpbi")
-theme_override_font_sizes/font_size = 14
-horizontal_alignment = 2
-vertical_alignment = 2
-
-[node name="SlotButton7" type="Button" parent="UIContainer/MarginContainer/VBoxContainer/HotbarContainer"]
-custom_minimum_size = Vector2(40, 40)
+[node name="HotbarSlot7" parent="UIContainer/MarginContainer/VBoxContainer/HotbarContainer" instance=ExtResource("4_1v5rv")]
 layout_mode = 2
 
-[node name="ItemIcon" type="TextureRect" parent="UIContainer/MarginContainer/VBoxContainer/HotbarContainer/SlotButton7"]
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-expand_mode = 1
-stretch_mode = 5
-
-[node name="QuantityLabel" type="Label" parent="UIContainer/MarginContainer/VBoxContainer/HotbarContainer/SlotButton7"]
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-theme_override_fonts/font = ExtResource("4_srpbi")
-theme_override_font_sizes/font_size = 14
-horizontal_alignment = 2
-vertical_alignment = 2
-
-[node name="SlotButton8" type="Button" parent="UIContainer/MarginContainer/VBoxContainer/HotbarContainer"]
-custom_minimum_size = Vector2(40, 40)
+[node name="HotbarSlot8" parent="UIContainer/MarginContainer/VBoxContainer/HotbarContainer" instance=ExtResource("4_1v5rv")]
 layout_mode = 2
-
-[node name="ItemIcon" type="TextureRect" parent="UIContainer/MarginContainer/VBoxContainer/HotbarContainer/SlotButton8"]
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-expand_mode = 1
-stretch_mode = 5
-
-[node name="QuantityLabel" type="Label" parent="UIContainer/MarginContainer/VBoxContainer/HotbarContainer/SlotButton8"]
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-theme_override_fonts/font = ExtResource("4_srpbi")
-theme_override_font_sizes/font_size = 14
-horizontal_alignment = 2
-vertical_alignment = 2
 
 [node name="SelectionIndicator" type="TextureRect" parent="UIContainer/MarginContainer/VBoxContainer/HotbarContainer"]
 custom_minimum_size = Vector2(40, 40)
 layout_mode = 2
 mouse_filter = 2
 texture = ExtResource("5_spcu4")
+stretch_mode = 5
+
+[node name="InventoryPanel" parent="." instance=ExtResource("6_1v5rv")]
+
+[node name="CursorItemDisplay" parent="." instance=ExtResource("7_q43x7")]

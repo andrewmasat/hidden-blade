@@ -1,13 +1,13 @@
+# player.gd
 extends CharacterBody2D
+
+const DebugItemResource = preload("res://items/consumable_potion_health.tres")
 
 # Signals for HUD
 signal health_changed(current_health: float, max_health: float)
-signal dash_charge_used(charge_index: int, recharge_duration: float)
-signal dash_count_changed(ready_count: int)
+signal dash_charges_changed(current_charges: int, max_charges: int)
 
-# States Enum
 enum State { IDLE_RUN, DASH, ATTACK }
-enum DashSlotState { READY, RECHARGING }
 
 # Stats
 @export var max_health: float = 100.0
@@ -15,88 +15,114 @@ var current_health: float :
 	set(value):
 		var previous_health = current_health
 		current_health = clampf(value, 0, max_health)
-		if current_health != previous_health: # Only emit if changed
+		if current_health != previous_health:
 			emit_signal("health_changed", current_health, max_health)
 
 @export var max_dashes: int = 3
-@export var dash_recharge_time: float = 3.0
-var current_dashes: int
-var dash_slot_states: Array[DashSlotState] = []
+@export var dash_recharge_time: float = 2.0 # Time in seconds to recharge ONE dash
+# Removed dash_action_cooldown export
+var _current_dashes: int
+
+var current_dashes: int :
+	get: return _current_dashes
+	set(value):
+		var previous_dashes = _current_dashes
+		_current_dashes = clampi(value, 0, max_dashes)
+		if _current_dashes != previous_dashes:
+			emit_signal("dash_charges_changed", _current_dashes, max_dashes)
 
 # Movement Variables
 @export var speed: float = 100.0
-@export var dash_speed: float = 200.0
+@export var dash_speed: float = 350.0
 
 # State Variables
 var current_state: State = State.IDLE_RUN
 var last_direction: Vector2 = Vector2.DOWN
+var equipped_item_data: ItemData = null
 
 # Node References
 @onready var animated_sprite = $AnimatedSprite2D
-@onready var dash_timer = $DashTimer
+@onready var dash_timer = $DashTimer # Dash duration
+@onready var dash_recharge_timer = $DashRechargeTimer # Charge regeneration
+@onready var equipped_item_sprite = $Hand/EquippedItemSprite
+@onready var hud = get_tree().get_first_node_in_group("HUD")
 
 func _ready():
 	self.current_health = max_health
-	self.current_dashes = max_dashes # Start with full dashes
+	self._current_dashes = max_dashes
+	emit_signal("dash_charges_changed", _current_dashes, max_dashes)
 
-	# Initialize dash slot tracking (optional)
-	dash_slot_states.resize(max_dashes)
-	dash_slot_states.fill(DashSlotState.READY)
+	dash_recharge_timer.wait_time = dash_recharge_time
+	# Removed setting wait_time for dash_action_cooldown_timer
 
+	# Connect signals
 	dash_timer.timeout.connect(_on_dash_timer_timeout)
+	dash_recharge_timer.timeout.connect(_on_dash_recharge_timer_timeout)
+	# Removed connection for dash_action_cooldown_timer.timeout
 	animated_sprite.animation_finished.connect(_on_animation_finished)
 	Inventory.selected_slot_changed.connect(_on_selected_slot_changed)
+
 	_equip_item(Inventory.get_selected_item())
-	emit_signal("dash_count_changed", current_dashes)
 
+# --- Main Loop ---
 func _physics_process(delta: float):
-	match current_state:
-		State.IDLE_RUN:
-			process_idle_run_state(delta)
-			# Check for DEBUG input
-			if Input.is_action_just_pressed("debug_damage"): # Add "debug_damage" to Input Map (e.g., key '1')
-				take_damage(10)
-			if Input.is_action_just_pressed("debug_heal"): # Add "debug_heal" to Input Map (e.g., key '2')
-				heal(10)
-			if Input.is_action_just_pressed("debug_add_item"): # Add "debug_add_item" to Input Map (e.g., key '3')
-				# Replace with actual item resource/path later
-				var success = Inventory.add_item("res://icon.svg") # Add default Godot icon for testing
-				if not success: print("Could not add item (inventory full?)")
+	# Check if inventory is open (needs access to HUD state or a global flag)
+	var hud = get_node("/root/Main/HUD") # Example path, use a better method like groups or signals
+	var is_inventory_open = false
+	if hud and hud.has_method("is_inventory_open"): # Add is_inventory_open() to HUD.gd
+		is_inventory_open = hud.is_inventory_open()
 
-		State.DASH:
-			process_dash_state(delta)
-		State.ATTACK:
-			process_attack_state(delta)
+	# --- Handle Inventory Selection Input (Always Available) ---
+	handle_inventory_input()
 
-	move_and_slide()
+	# --- Handle Use Item Input (Only if inventory closed?) ---
+	if not is_inventory_open and Input.is_action_just_pressed("use_item"):
+		try_use_selected_item() # Call new function
 
-func get_max_dashes() -> int:
-	return max_dashes
+	if not is_inventory_open:
+		match current_state:
+			State.IDLE_RUN:
+				process_idle_run_state(delta)
+				# Debug Inputs (Keep if needed)
+				if Input.is_action_just_pressed("debug_damage"): take_damage(10)
+				if Input.is_action_just_pressed("debug_heal"): heal(10)
+				if Input.is_action_just_pressed("debug_add_item"):
+					if DebugItemResource:
+						# Important: DUPLICATE the resource so each add gets a unique instance
+						# Otherwise changing quantity of one stack changes all!
+						var new_item_instance = DebugItemResource.duplicate()
+						# Set initial quantity if needed (or handle in add_item)
+						new_item_instance.quantity = 1
+						var success = Inventory.add_item(new_item_instance)
+						if not success: print("Could not add debug item (inventory full?)")
+					else:
+						printerr("Debug item resource not loaded!")
+			State.DASH:
+				process_dash_state(delta)
+			State.ATTACK:
+				process_attack_state(delta)
+		move_and_slide()
+	else:
+		# Optional: Decelerate player if inventory is open?
+		velocity = velocity.move_toward(Vector2.ZERO, speed)
+		move_and_slide() # Apply deceleration
 
-func get_current_dash_charges() -> int:
-	return current_dashes
-
-func get_current_health() -> float:
-	return current_health
-
-func get_max_health() -> float:
-	return max_health
-
-# --- State Processing Functions ---
-
-func process_idle_run_state(_delta: float):
+# --- State Processing ---
+func process_idle_run_state(delta: float):
+	# Check for state transitions FIRST
 	if Input.is_action_just_pressed("attack"):
 		start_attack()
 		return
 
 	if Input.is_action_just_pressed("dash"):
+		# Check only for available charges
 		if current_dashes > 0:
-			start_dash() # Will handle charge consumption and signal emit
+			start_dash()
 			return
 		else:
-			print("Out of dashes!")
+			print("Out of dashes!") # Feedback
 
-	# Movement Input (keep existing logic)
+	# Handle standard movement input
 	var input_direction = Input.get_vector("move_left", "move_right", "move_up", "move_down")
 	if input_direction != Vector2.ZERO:
 		velocity = input_direction.normalized() * speed
@@ -106,132 +132,206 @@ func process_idle_run_state(_delta: float):
 		velocity = velocity.move_toward(Vector2.ZERO, speed)
 		update_animation("idle", last_direction)
 
-func process_dash_state(_delta: float):
-	# During dash, movement is fixed based on dash_speed and the direction when started
-	# Velocity is set in start_dash() and maintained until timer ends
-	# No input checking needed here, waiting for timer timeout
-	pass # move_and_slide() will handle the movement
+func process_dash_state(delta: float):
+	pass # Movement handled by move_and_slide
 
-func process_attack_state(_delta: float):
-	# Typically stop movement during attack
+func process_attack_state(delta: float):
 	velocity = Vector2.ZERO
-	# No input checking needed here, waiting for animation_finished signal
-	pass # move_and_slide() will apply zero velocity
+	pass # State ends on animation finish
 
 # --- Action Start Functions ---
-
 func start_dash():
-	var charge_index_to_use = -1
-	for i in range(max_dashes - 1, -1, -1): # Loop from end towards beginning
-		if dash_slot_states[i] == DashSlotState.READY:
-			charge_index_to_use = i
-			break # Found the first ready slot from the right
+	self.current_dashes -= 1
 
-	if charge_index_to_use == -1:
-		printerr("StartDash called but no READY slot found (should be caught by current_dashes > 0)")
-		return # Should not happen if current_dashes > 0 check works
+	# Removed starting the action cooldown timer and setting the flag
 
-	# Mark the specific slot as recharging internally
-	dash_slot_states[charge_index_to_use] = DashSlotState.RECHARGING
-	# Decrement the count of ready dashes
-	current_dashes -= 1
-
-	# Signal which specific slot was used (for HUD to start its timer)
-	emit_signal("dash_charge_used", charge_index_to_use, dash_recharge_time)
-	# Signal the NEW total count of ready dashes (for HUD to update visuals)
-	emit_signal("dash_count_changed", current_dashes) # Emit AFTER count is updatede)
-
-	# Start the dash action state
 	current_state = State.DASH
 	velocity = last_direction * dash_speed
 	update_animation("dash", last_direction)
-	dash_timer.start() # Start the timer for the dash *movement*
+	dash_timer.start() # Start dash duration
+
+	# Start recharge timer if needed
+	if dash_recharge_timer.is_stopped() and current_dashes < max_dashes:
+		dash_recharge_timer.start()
 
 func start_attack():
+	# Keep existing logic
 	var equipped_item = Inventory.get_selected_item()
-	if current_state == State.IDLE_RUN and equipped_item != null: # Only attack if idle/run AND item equipped
+	if current_state == State.IDLE_RUN and equipped_item != null:
 		current_state = State.ATTACK
 		update_animation("attack", last_direction)
 		velocity = Vector2.ZERO
-		print("Player attacks with:", equipped_item) # Replace with actual attack logic later
+		print("Player attacks with:", equipped_item)
 	elif equipped_item == null:
 		print("No item equipped to attack with!")
 
-# --- Stat Management ---
+# --- Stat Management (Keep take_damage, heal, die) ---
 func take_damage(amount: float):
 	self.current_health -= amount
 	print("Player took damage, health:", current_health)
-	if current_health <= 0:
-		die()
+	if current_health <= 0: die()
 
-func heal(amount: float):
-	self.current_health += amount
-	print("Player healed, health:", current_health)
-
-func gain_dash_charge(charge_index: int):
-	# Validate the index and ensure the slot was actually recharging
-	if charge_index >= 0 and charge_index < dash_slot_states.size():
-		if dash_slot_states[charge_index] == DashSlotState.RECHARGING:
-			dash_slot_states[charge_index] = DashSlotState.READY
-			current_dashes += 1 # Increment the ready count
-
-			# Signal the NEW total count of ready dashes
-			emit_signal("dash_count_changed", current_dashes) # Emit AFTER count is updated
-		else:
-			printerr("Tried to gain dash charge for index", charge_index, " but it wasn't recharging!")
-	else:
-		printerr("Tried to gain dash charge for invalid index:", charge_index)
+func heal(amount: float) -> bool:
+	var previous_health = current_health
+	self.current_health += amount # Use the setter (which handles clamping & signal)
+	var health_changed = (current_health > previous_health) # Check if health increased
+	if health_changed:
+		print("Player healed, health:", current_health)
+	return health_changed # Return whether health actually changed
 
 func die():
 	print("Player has died!")
-	# Add death animation, game over screen, etc.
-	queue_free() # Example: remove player node
+	queue_free()
 
-# --- Helper Functions ---
+func handle_inventory_input():
+	# Cycle selection
+	if Input.is_action_just_pressed("inventory_next"):
+		Inventory.select_next_slot()
+	if Input.is_action_just_pressed("inventory_previous"):
+		Inventory.select_previous_slot()
 
+	# Direct slot selection (Quick Select)
+	if Input.is_action_just_pressed("inventory_slot_1"):
+		Inventory.set_selected_slot(0) # Slot 1 corresponds to index 0
+	if Input.is_action_just_pressed("inventory_slot_2"):
+		Inventory.set_selected_slot(1)
+	if Input.is_action_just_pressed("inventory_slot_3"):
+		Inventory.set_selected_slot(2)
+	if Input.is_action_just_pressed("inventory_slot_4"):
+		Inventory.set_selected_slot(3)
+	if Input.is_action_just_pressed("inventory_slot_5"):
+		Inventory.set_selected_slot(4)
+	if Input.is_action_just_pressed("inventory_slot_6"):
+		Inventory.set_selected_slot(5)
+	if Input.is_action_just_pressed("inventory_slot_7"):
+		Inventory.set_selected_slot(6)
+	if Input.is_action_just_pressed("inventory_slot_8"):
+		Inventory.set_selected_slot(7)
+	if Input.is_action_just_pressed("inventory_slot_9"):
+		Inventory.set_selected_slot(8)
+
+# --- Helper Functions (Keep update_animation) ---
 func update_animation(action_prefix: String, direction: Vector2):
-	# Determine direction string ("up", "down", "left", "right")
 	var direction_name = ""
 	if abs(direction.x) > abs(direction.y):
 		direction_name = "right" if direction.x > 0 else "left"
-	else: # Prioritize vertical or if equal
+	else:
 		direction_name = "down" if direction.y > 0 else "up"
-
-	# Construct animation name (e.g., "run_right", "attack_up")
 	var new_anim = action_prefix + "_" + direction_name
-
-	# Only play if the animation is different
 	if animated_sprite.animation != new_anim:
 		animated_sprite.play(new_anim)
 
-func _equip_item(item_data):
-	# This is where you'd change the player's visuals or stats based on the item
-	if item_data:
-		print("Player equips:", item_data)
-		# Example: Change a weapon sprite texture
-		# if hand_sprite: hand_sprite.texture = load(item_data) # Assuming item_data is path
+# --- Equipping (Keep _equip_item) ---
+func _equip_item(item_data: ItemData):
+	# Clear previous equip state first
+	equipped_item_data = null
+	if equipped_item_sprite: equipped_item_sprite.visible = false
+
+	# Check if the new item is valid and equippable
+	if item_data != null and item_data is ItemData and item_data.is_equippable():
+		equipped_item_data = item_data
+		if equipped_item_sprite:
+			equipped_item_sprite.texture = item_data.texture
+			equipped_item_sprite.visible = true
+		print("Player equipped:", equipped_item_data.item_id)
 	else:
-		print("Player unequips item (empty slot selected)")
-		# Example: Hide weapon sprite
-		# if hand_sprite: hand_sprite.texture = null
+		print("Player equipped nothing (or item not equippable).")
+
+func try_use_selected_item():
+	var selected_item: ItemData = Inventory.get_selected_item()
+
+	if selected_item != null and selected_item is ItemData:
+		match selected_item.item_type:
+			ItemData.ItemType.CONSUMABLE:
+				# Check if the specific consumable CAN be used *before* consuming
+				if _can_use_consumable(selected_item):
+					_consume_item(selected_item, Inventory.selected_slot_index)
+				else:
+					print("Cannot use '", selected_item.item_id, "' right now (e.g., health full).")
+			# ... (other item types remain the same) ...
+			ItemData.ItemType.WEAPON:
+				print("Selected item is a weapon. Attack action is separate.")
+			ItemData.ItemType.TOOL:
+				print("Selected item is a tool. Use via interaction.")
+			ItemData.ItemType.PLACEABLE:
+				print("Selected item is placeable. Placement logic needed.")
+			_:
+				print("Selected item type cannot be 'used' directly:", ItemData.ItemType.keys()[selected_item.item_type])
+	else:
+		print("No item selected to use.")
+
+func _can_use_consumable(item_data: ItemData) -> bool:
+	if item_data == null or not item_data is ItemData: return false
+
+	match item_data.item_id: # Check based on item ID
+		"consumable_potion_health":
+			# Can use health potion only if health is not full
+			return current_health < max_health
+		"potion_mana": # Example for another type
+			# Assuming you have current_mana and max_mana variables
+			# return current_mana < max_mana
+			return true # Placeholder - always usable for now
+		"scroll_speed": # Example buff
+			# Check if speed buff is already active?
+			# return not is_speed_buff_active
+			return true # Placeholder - always usable for now
+		_:
+			# Default: Allow unknown consumables? Or deny? Let's allow for now.
+			print("Consumable check: Unknown item_id '", item_data.item_id, "', assuming usable.")
+			return true
+
+func _consume_item(item_data: ItemData, hotbar_slot_index: int):
+	print("Consuming:", item_data.item_id)
+
+	# --- Apply Effect ---
+	var effect_applied = false # Flag to track if any effect actually happened
+	match item_data.item_id:
+		"consumable_potion_health":
+			var heal_value = item_data.get("heal_amount")
+			if heal(heal_value): # Use the heal function which returns true if health actually changed
+				effect_applied = true
+		"potion_mana":
+			# apply_mana_effect()
+			effect_applied = true # Assume effect applies
+		"scroll_speed":
+			# apply_speed_buff()
+			effect_applied = true # Assume effect applies
+		_:
+			print("No defined effect for consuming:", item_data.item_id)
+			# Decide if unknown consumables should still be used up
+			effect_applied = true # Let's assume yes for now
+
+	# --- Decrease Quantity in Inventory ---
+	var success = Inventory.decrease_item_quantity(Inventory.InventoryArea.HOTBAR, hotbar_slot_index, 1)
+	if not success:
+		printerr("Failed to decrease quantity after consuming item!")
 
 # --- Signal Callbacks ---
 
 func _on_dash_timer_timeout():
-	# Dash finished, return to idle/run state
-	velocity = Vector2.ZERO # Stop the dash velocity
-	current_state = State.IDLE_RUN
-	# Immediately update animation to idle in case no movement keys are held
-	update_animation("idle", last_direction)
-
-func _on_animation_finished():
-	# Check if the finished animation was an attack animation
-	# Godot 4: animation property holds the name of the *current* animation being played
-	if current_state == State.ATTACK and animated_sprite.animation.begins_with("attack_"):
+	# Dash duration finished
+	velocity = Vector2.ZERO
+	if current_state == State.DASH:
 		current_state = State.IDLE_RUN
-		# Update animation immediately after attack finishes
 		update_animation("idle", last_direction)
 
-func _on_selected_slot_changed(_new_index: int, _old_index: int, item_data):
-	# Called when the *inventory* signals a selection change
+func _on_dash_recharge_timer_timeout():
+	# One charge regenerated
+	print("Dash charge regenerated")
+	self.current_dashes += 1
+	if current_dashes < max_dashes:
+		dash_recharge_timer.start()
+	else:
+		print("Dash charges full.")
+
+# Removed _on_dash_action_cooldown_timer_timeout() function
+
+func _on_animation_finished():
+	# Keep existing attack animation logic
+	if current_state == State.ATTACK and animated_sprite.animation.begins_with("attack_"):
+		current_state = State.IDLE_RUN
+		update_animation("idle", last_direction)
+
+func _on_selected_slot_changed(new_index: int, old_index: int, item_data: ItemData):
+	print("Player detected selected slot change. New Item:", item_data)
 	_equip_item(item_data)

@@ -298,3 +298,13 @@ shape = SubResource("CircleShape2D_oul6g")
 [node name="DashTimer" type="Timer" parent="."]
 wait_time = 0.3
 one_shot = true
+
+[node name="DashRechargeTimer" type="Timer" parent="."]
+wait_time = 2.0
+one_shot = true
+
+[node name="Hand" type="Node2D" parent="."]
+position = Vector2(-5, 6)
+
+[node name="EquippedItemSprite" type="Sprite2D" parent="Hand"]
+visible = false

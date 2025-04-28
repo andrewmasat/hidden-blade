@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="ItemData" load_steps=3 format=3 uid="uid://dqxboj7i2bska"]
+
+[ext_resource type="Script" uid="uid://cd5h74w7bgd82" path="res://scripts/ItemData.gd" id="1_ax1i0"]
+[ext_resource type="Texture2D" uid="uid://056qse0fsr7m" path="res://assets/Items/Tool/Hammer.png" id="2_8ltgo"]
+
+[resource]
+script = ExtResource("1_ax1i0")
+item_id = "tool_hammer"
+quantity = 1
+max_stack_size = 1
+texture = ExtResource("2_8ltgo")
+item_type = 3
+metadata/_custom_type_script = "uid://cd5h74w7bgd82"
