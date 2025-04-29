@@ -91,14 +91,18 @@ func _handle_double_click():
 func _get_drag_data(at_position: Vector2):
 	# Prevent drag if holding item on cursor OR if double-click just happened
 	if Inventory.get_cursor_item() != null: return null
-	var current_time_msec = Time.get_ticks_msec()
-	if current_time_msec - last_click_time_msec < 50: return null
 
 	# Get item data from the central inventory
-	var item_data = Inventory.get_item_data(inventory_area, slot_index)
+	var item_data: ItemData = Inventory.get_item_data(inventory_area, slot_index)
 
 	# Only allow dragging if there's an item
 	if item_data != null:
+		var item_put_on_cursor = Inventory.remove_item_and_put_on_cursor(inventory_area, slot_index)
+
+		if item_put_on_cursor == null:
+			printerr("_get_drag_data: Failed to move item from slot to cursor before drag.")
+			return null # Abort drag if removal failed
+
 		# Prepare data package for drop target
 		var drag_data = {
 			"source_area": inventory_area,
@@ -110,6 +114,7 @@ func _get_drag_data(at_position: Vector2):
 		var preview_container = Control.new()
 		preview_container.size = drag_preview_size
 		preview_container.clip_contents = false
+		preview_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 		var preview_icon = TextureRect.new()
 		preview_icon.texture = item_data.texture
@@ -118,6 +123,7 @@ func _get_drag_data(at_position: Vector2):
 		# Let the icon fill the container
 		preview_icon.size = preview_container.size
 		preview_icon.position = Vector2.ZERO # Position at top-left of container
+		preview_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		preview_container.add_child(preview_icon)
 
 		if item_data.quantity > 1:
@@ -151,18 +157,11 @@ func _get_drag_data(at_position: Vector2):
 		return null # No drag starts if slot is empty
 
 func _can_drop_data(at_position: Vector2, data) -> bool:
-	# Check if data includes ItemData resource
-	return data is Dictionary and \
-		   data.has("source_area") and \
-		   data.has("source_index") and \
-		   data.has("item_data") and \
-		   data["item_data"] is ItemData # Verify type
+	if Inventory.get_cursor_item() == null:
+		# Cannot drop anything if cursor is empty (shouldn't happen if drag started correctly)
+		return false
+	return true
 
 func _drop_data(at_position: Vector2, data):
 	# Simple swap logic (using the potentially updated move_item)
-	Inventory.move_item(
-		data["source_area"],
-		data["source_index"],
-		inventory_area,
-		slot_index
-	)
+	Inventory.place_cursor_item_on_slot(inventory_area, slot_index)

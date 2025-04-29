@@ -1,5 +1,6 @@
-[gd_resource type="Resource" script_class="ItemData" load_steps=3 format=3 uid="uid://d7o2yjv3jv7b"]
+[gd_resource type="Resource" script_class="ItemData" load_steps=4 format=3 uid="uid://d7o2yjv3jv7b"]
 
+[ext_resource type="Texture2D" uid="uid://dkgyie0gd8e02" path="res://assets/Items/Weapons/Sword2/SpriteInHand.png" id="1_bayw5"]
 [ext_resource type="Script" uid="uid://cd5h74w7bgd82" path="res://scripts/ItemData.gd" id="1_rstis"]
 [ext_resource type="Texture2D" uid="uid://bijgomryg0ofq" path="res://assets/Items/Weapons/Sword2/Sprite.png" id="2_hy7hr"]
 
@@ -11,5 +12,6 @@ max_stack_size = 1
 texture = ExtResource("2_hy7hr")
 item_type = 2
 heal_amount = 0
+equipped_texture = ExtResource("1_bayw5")
 damage = 5.0
 metadata/_custom_type_script = "uid://cd5h74w7bgd82"

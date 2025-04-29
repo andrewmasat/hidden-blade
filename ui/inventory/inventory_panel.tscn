@@ -48,6 +48,7 @@ layout_mode = 2
 
 [node name="InventoryGrid" type="GridContainer" parent="MarginContainer/PanelLayout"]
 layout_mode = 2
+mouse_filter = 2
 columns = 8
 
 [node name="HSeparator2" type="HSeparator" parent="MarginContainer/PanelLayout"]

@@ -7,7 +7,7 @@ const InventorySlotScene = preload("res://ui/inventory/inventory_slot.tscn")
 @onready var health_bar = $UIContainer/MarginContainer/VBoxContainer/HealthBar # % shorthand requires Godot 4 and unique names in the scene tree branch
 @onready var hotbar_container = $UIContainer/MarginContainer/VBoxContainer/HotbarContainer
 @onready var selection_indicator = $UIContainer/MarginContainer/VBoxContainer/HotbarContainer/SelectionIndicator
-@onready var inventory_panel = $InventoryPanel
+@onready var inventory_panel = $UIContainer/InventoryPanel
 
 # Keep track of references to slot elements for easier updates
 var slot_buttons: Array[Button] = []

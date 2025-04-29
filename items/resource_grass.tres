@@ -1,0 +1,15 @@
+[gd_resource type="Resource" script_class="ItemData" load_steps=3 format=3 uid="uid://fvskgngnjrtw"]
+
+[ext_resource type="Script" uid="uid://cd5h74w7bgd82" path="res://scripts/ItemData.gd" id="1_ge7br"]
+[ext_resource type="Texture2D" uid="uid://ba1rdv1ocru54" path="res://assets/Items/Resource/Grass.png" id="2_ea6b6"]
+
+[resource]
+script = ExtResource("1_ge7br")
+item_id = "resource_grass"
+quantity = 1
+max_stack_size = 99
+texture = ExtResource("2_ea6b6")
+item_type = 4
+heal_amount = 0
+damage = 0.0
+metadata/_custom_type_script = "uid://cd5h74w7bgd82"

@@ -26,6 +26,7 @@ enum ItemType {
 @export_group("Consumable")
 @export var heal_amount: int = 0
 @export_group("Weapon")
+@export var equipped_texture: Texture2D
 @export var damage: float = 0.0
 @export_group("Placeable")
 @export var placeable_scene: PackedScene

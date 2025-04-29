@@ -149,6 +149,33 @@ func remove_item_from_main_inventory(slot_index: int):
 			return removed_item
 	return null
 
+func remove_item_and_put_on_cursor(area: InventoryArea, index: int) -> ItemData:
+	var slots = _get_slot_array(area)
+	if index < 0 or index >= slots.size():
+		printerr("remove_item_and_put_on_cursor: Invalid index ", index)
+		return null
+
+	var item_to_move: ItemData = slots[index]
+
+	if item_to_move == null:
+		print("remove_item_and_put_on_cursor: Slot already empty.")
+		return null # Nothing to move
+
+	# Clear the source slot FIRST internally
+	if not _set_item_data(area, index, null):
+		printerr("remove_item_and_put_on_cursor: Failed to clear source slot.")
+		return null # Abort if clearing failed
+
+	# Put the item onto the cursor
+	# IMPORTANT: Use the actual ItemData removed, not a duplicate here.
+	set_cursor_item(item_to_move) # This emits cursor_item_changed
+
+	# Emit signal for the source slot becoming empty
+	_emit_change_signal(area, index, null)
+
+	# Return the item that was moved to the cursor
+	return item_to_move
+
 func find_first_empty_slot(area: InventoryArea) -> int:
 	var slots = _get_slot_array(area)
 	for i in range(slots.size()):
@@ -405,11 +432,9 @@ func place_cursor_item_on_slot(target_area: InventoryArea, target_index: int):
 
 	# Case 3: Target slot has DIFFERENT item type (swap)
 	else:
-		print("Place Cursor: Target different. Swapping...")
-		var item_that_was_in_slot = target_item
 		_set_item_data(target_area, target_index, cursor_item_data) # Put cursor item in slot
 		_emit_change_signal(target_area, target_index, cursor_item_data) # Update slot UI
-		set_cursor_item(item_that_was_in_slot) # Put slot item onto cursor, updates cursor UI via signal
+		set_cursor_item(target_item) # Put slot item onto cursor, updates cursor UI via signal
 
 func move_item(source_area: InventoryArea, source_index: int, target_area: InventoryArea, target_index: int):
 	# Prevent dropping onto itself (no action needed)

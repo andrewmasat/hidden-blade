@@ -1,7 +1,8 @@
 # player.gd
 extends CharacterBody2D
 
-const DebugItemResource = preload("res://items/consumable_potion_health.tres")
+const DebugItemResource = preload("res://items/weapon_sword_2.tres")
+const DroppedItemScene = preload("res://world/dropped_item.tscn")
 
 # Signals for HUD
 signal health_changed(current_health: float, max_health: float)
@@ -39,12 +40,16 @@ var current_dashes: int :
 var current_state: State = State.IDLE_RUN
 var last_direction: Vector2 = Vector2.DOWN
 var equipped_item_data: ItemData = null
+var nearby_items: Array[DroppedItem] = []
 
 # Node References
 @onready var animated_sprite = $AnimatedSprite2D
-@onready var dash_timer = $DashTimer # Dash duration
-@onready var dash_recharge_timer = $DashRechargeTimer # Charge regeneration
+@onready var hand_node = $Hand
 @onready var equipped_item_sprite = $Hand/EquippedItemSprite
+@onready var pickup_area = $PickupArea
+@onready var dash_timer = $DashTimer
+@onready var dash_recharge_timer = $DashRechargeTimer
+@onready var animation_player = $AnimationPlayer
 @onready var hud = get_tree().get_first_node_in_group("HUD")
 
 func _ready():
@@ -53,21 +58,21 @@ func _ready():
 	emit_signal("dash_charges_changed", _current_dashes, max_dashes)
 
 	dash_recharge_timer.wait_time = dash_recharge_time
-	# Removed setting wait_time for dash_action_cooldown_timer
 
 	# Connect signals
 	dash_timer.timeout.connect(_on_dash_timer_timeout)
 	dash_recharge_timer.timeout.connect(_on_dash_recharge_timer_timeout)
-	# Removed connection for dash_action_cooldown_timer.timeout
-	animated_sprite.animation_finished.connect(_on_animation_finished)
+	animation_player.animation_finished.connect(_on_animation_finished)
 	Inventory.selected_slot_changed.connect(_on_selected_slot_changed)
+	if is_instance_valid(pickup_area):
+		pickup_area.area_entered.connect(_on_pickup_area_entered)
+		pickup_area.area_exited.connect(_on_pickup_area_exited)
 
 	_equip_item(Inventory.get_selected_item())
 
 # --- Main Loop ---
 func _physics_process(delta: float):
 	# Check if inventory is open (needs access to HUD state or a global flag)
-	var hud = get_node("/root/Main/HUD") # Example path, use a better method like groups or signals
 	var is_inventory_open = false
 	if hud and hud.has_method("is_inventory_open"): # Add is_inventory_open() to HUD.gd
 		is_inventory_open = hud.is_inventory_open()
@@ -76,8 +81,13 @@ func _physics_process(delta: float):
 	handle_inventory_input()
 
 	# --- Handle Use Item Input (Only if inventory closed?) ---
-	if not is_inventory_open and Input.is_action_just_pressed("use_item"):
-		try_use_selected_item() # Call new function
+	if not is_inventory_open:
+		if Input.is_action_just_pressed("drop_item"):
+			try_drop_selected_item()
+		if Input.is_action_just_pressed("pickup_item"):
+			try_pickup_nearby_item()
+		if Input.is_action_just_pressed("use_item"):
+			try_use_selected_item()
 
 	if not is_inventory_open:
 		match current_state:
@@ -122,15 +132,21 @@ func process_idle_run_state(delta: float):
 		else:
 			print("Out of dashes!") # Feedback
 
-	# Handle standard movement input
+	# --- Handle standard movement input ---
 	var input_direction = Input.get_vector("move_left", "move_right", "move_up", "move_down")
+	var is_moving = false
 	if input_direction != Vector2.ZERO:
 		velocity = input_direction.normalized() * speed
+		# IMPORTANT: Update last_direction ONLY when input is active
 		last_direction = input_direction.normalized()
-		update_animation("run", last_direction)
+		is_moving = true
 	else:
 		velocity = velocity.move_toward(Vector2.ZERO, speed)
-		update_animation("idle", last_direction)
+		is_moving = (velocity.length_squared() > 0.1) # Still considered moving if decelerating
+
+	# --- Update Animation ---
+	# Call the central function AFTER velocity and last_direction are potentially updated
+	_update_hand_and_weapon_animation()
 
 func process_dash_state(delta: float):
 	pass # Movement handled by move_and_slide
@@ -147,7 +163,7 @@ func start_dash():
 
 	current_state = State.DASH
 	velocity = last_direction * dash_speed
-	update_animation("dash", last_direction)
+	_update_hand_and_weapon_animation()
 	dash_timer.start() # Start dash duration
 
 	# Start recharge timer if needed
@@ -159,7 +175,7 @@ func start_attack():
 	var equipped_item = Inventory.get_selected_item()
 	if current_state == State.IDLE_RUN and equipped_item != null:
 		current_state = State.ATTACK
-		update_animation("attack", last_direction)
+		_update_hand_and_weapon_animation()
 		velocity = Vector2.ZERO
 		print("Player attacks with:", equipped_item)
 	elif equipped_item == null:
@@ -210,20 +226,110 @@ func handle_inventory_input():
 	if Input.is_action_just_pressed("inventory_slot_9"):
 		Inventory.set_selected_slot(8)
 
-# --- Helper Functions (Keep update_animation) ---
-func update_animation(action_prefix: String, direction: Vector2):
-	var direction_name = ""
-	if abs(direction.x) > abs(direction.y):
-		direction_name = "right" if direction.x > 0 else "left"
-	else:
-		direction_name = "down" if direction.y > 0 else "up"
-	var new_anim = action_prefix + "_" + direction_name
-	if animated_sprite.animation != new_anim:
-		animated_sprite.play(new_anim)
+func handle_world_drop(item_data_dropped: ItemData):
+	if item_data_dropped == null or not item_data_dropped is ItemData:
+		printerr("Player handle_world_drop: Received invalid item data.")
+		return
 
-# --- Equipping (Keep _equip_item) ---
+	print("Player handling world drop for:", item_data_dropped.item_id)
+
+	# Uses the same logic as try_drop_selected_item, but item is already "removed" (was on cursor)
+	if DroppedItemScene == null:
+		printerr("DroppedItemScene not preloaded! Cannot drop item.")
+		# Try putting item back in inventory as fallback
+		if not Inventory.add_item(item_data_dropped):
+			printerr("  -> Failed to add dropped item back to inventory!")
+		return
+
+	var dropped_item_instance = DroppedItemScene.instantiate()
+
+	# Determine drop position (slightly in front of player)
+	var drop_offset = last_direction.normalized() * 25.0
+	if drop_offset == Vector2.ZERO: drop_offset = Vector2(25, 0)
+	var drop_position = global_position + drop_offset
+
+	# Add to scene tree (player's parent)
+	var main_level = get_parent()
+	if is_instance_valid(main_level):
+		main_level.add_child(dropped_item_instance)
+		dropped_item_instance.global_position = drop_position
+		# Initialize the dropped item with data
+		if dropped_item_instance.has_method("initialize"):
+			# IMPORTANT: We pass the data directly. DroppedItem should handle it.
+			# No need to duplicate here unless initialize modifies the original unexpectedly.
+			dropped_item_instance.initialize(item_data_dropped)
+		else:
+			printerr("DroppedItem instance missing initialize method!")
+			dropped_item_instance.queue_free()
+			Inventory.add_item(item_data_dropped) # Try to put back
+	else:
+		printerr("Player has no valid parent to add dropped item to!")
+		Inventory.add_item(item_data_dropped) # Try to put back
+
+# --- Helper Functions ---
+func get_target_animation() -> String:
+	var action_prefix = "idle" # Default
+
+	# Determine action based on state and velocity
+	match current_state:
+		State.IDLE_RUN:
+			if velocity.length_squared() > 0.1:
+				action_prefix = "run"
+			else:
+				action_prefix = "idle"
+		State.DASH:
+			action_prefix = "dash" # Assumes dash animations exist
+		State.ATTACK:
+			action_prefix = "attack" # Assumes attack animations exist
+		_:
+			action_prefix = "idle" # Fallback
+
+	# Determine direction suffix based on last_direction
+	var direction_suffix = ""
+	# Use a small threshold to prevent direction switching when stopping near zero
+	if abs(last_direction.x) > 0.1 or abs(last_direction.y) > 0.1:
+		if abs(last_direction.x) > abs(last_direction.y):
+			direction_suffix = "right" if last_direction.x > 0 else "left"
+		else:
+			direction_suffix = "down" if last_direction.y > 0 else "up"
+	else:
+		# If velocity is zero and last_direction is zeroish, default to down? Or keep previous?
+		# Let's try defaulting to down if completely stopped.
+		direction_suffix = "down"
+
+	# Construct the animation name (e.g., "run_right", "idle_up")
+	return action_prefix + "_" + direction_suffix
+
+
+# Plays the animation if it's different from the current one
+func play_animation_if_different(anim_name: String):
+	# Check if the AnimationPlayer node reference is valid AND not freed
+	if is_instance_valid(animation_player):
+		# Check if the animation exists before trying to play
+		if animation_player.has_animation(anim_name):
+			# Play only if the requested animation is not already the current one
+			if animation_player.current_animation != anim_name:
+				animation_player.play(anim_name)
+				# print("Playing animation:", anim_name) # Debug
+		else:
+			# Animation doesn't exist, play fallback
+			printerr("Animation not found:", anim_name, ". Playing idle_down fallback.")
+			var fallback_anim = "idle_down" # Define fallback
+			if animation_player.has_animation(fallback_anim) and \
+			   animation_player.current_animation != fallback_anim:
+				animation_player.play(fallback_anim)
+	else:
+		printerr("AnimationPlayer node is not valid!")
+
+
+# Central function called whenever state or direction might change animation
+func _update_hand_and_weapon_animation():
+	var target_anim = get_target_animation()
+	play_animation_if_different(target_anim)
+
+# --- Equipping ---
 func _equip_item(item_data: ItemData):
-	# Clear previous equip state first
+	# Clear previous equip state
 	equipped_item_data = null
 	if equipped_item_sprite: equipped_item_sprite.visible = false
 
@@ -231,11 +337,16 @@ func _equip_item(item_data: ItemData):
 	if item_data != null and item_data is ItemData and item_data.is_equippable():
 		equipped_item_data = item_data
 		if equipped_item_sprite:
-			equipped_item_sprite.texture = item_data.texture
-			equipped_item_sprite.visible = true
+			# Use the EQUIPPED texture now
+			equipped_item_sprite.texture = item_data.equipped_texture
+			equipped_item_sprite.visible = (item_data.equipped_texture != null) # Only show if texture exists
 		print("Player equipped:", equipped_item_data.item_id)
+		# Trigger animation update immediately to position hand correctly
+		_update_hand_and_weapon_animation()
 	else:
 		print("Player equipped nothing (or item not equippable).")
+		# Ensure hand position/weapon visibility resets if nothing equipped
+		_update_hand_and_weapon_animation()
 
 func try_use_selected_item():
 	var selected_item: ItemData = Inventory.get_selected_item()
@@ -306,14 +417,73 @@ func _consume_item(item_data: ItemData, hotbar_slot_index: int):
 	if not success:
 		printerr("Failed to decrease quantity after consuming item!")
 
-# --- Signal Callbacks ---
+func try_drop_selected_item():
+	var slot_index = Inventory.get_selected_slot_index()
+	var item_to_drop: ItemData = Inventory.get_selected_item() # Uses hotbar
 
+	if item_to_drop != null and item_to_drop is ItemData:
+		print("Player attempting to drop via key:", item_to_drop.item_id)
+		# Remove from inventory first
+		var removed_item_data: ItemData = Inventory.remove_item_from_hotbar(slot_index) # Assumes this gets unique data
+
+		if removed_item_data != null:
+			# Call the same world drop logic, passing the removed data
+			handle_world_drop(removed_item_data)
+		else:
+			printerr("Failed to remove item from hotbar to drop via key.")
+	else:
+		print("No item selected to drop via key.")
+
+
+# --- NEW: Pickup Item Logic ---
+func try_pickup_nearby_item():
+	if nearby_items.is_empty():
+		# print("No items nearby to pick up.") # Optional debug
+		return
+
+	# Try picking up the first item in the list (could implement closest logic later)
+	# Important: Iterate carefully if removing while looping. Let's take the first.
+	var item_node_to_pickup: DroppedItem = nearby_items[0]
+
+	# Ensure the node hasn't been freed already by another process
+	if not is_instance_valid(item_node_to_pickup):
+		printerr("Nearby item instance is invalid!")
+		nearby_items.pop_front() # Remove invalid entry
+		return # Try again next frame if needed
+
+	var data_to_add: ItemData = item_node_to_pickup.get_item_data()
+
+	if data_to_add != null and data_to_add is ItemData:
+		print("Player attempting to pick up:", data_to_add.item_id, "Qty:", data_to_add.quantity)
+
+		# Important: Duplicate the data if add_item doesn't handle it,
+		# because we will free the original node holding the data.
+		# Let's assume Inventory.add_item makes its own copy if needed.
+		var success = Inventory.add_item(data_to_add)
+
+		if success:
+			print("  -> Pickup successful!")
+			# Remove from nearby list BEFORE freeing the node
+			nearby_items.erase(item_node_to_pickup)
+			# Remove the item from the game world
+			item_node_to_pickup.queue_free()
+			# TODO: Play pickup sound/effect
+		else:
+			print("  -> Inventory full, cannot pick up.")
+			# TODO: Display "Inventory Full" message to player
+	else:
+		printerr("Could not get valid ItemData from nearby item node!")
+		# Remove potentially corrupted item from list and maybe world?
+		nearby_items.erase(item_node_to_pickup)
+		item_node_to_pickup.queue_free()
+
+# --- Signal Callbacks ---
 func _on_dash_timer_timeout():
 	# Dash duration finished
 	velocity = Vector2.ZERO
 	if current_state == State.DASH:
 		current_state = State.IDLE_RUN
-		update_animation("idle", last_direction)
+		_update_hand_and_weapon_animation()
 
 func _on_dash_recharge_timer_timeout():
 	# One charge regenerated
@@ -324,13 +494,27 @@ func _on_dash_recharge_timer_timeout():
 	else:
 		print("Dash charges full.")
 
-# Removed _on_dash_action_cooldown_timer_timeout() function
+func _on_pickup_area_entered(area):
+	# Check if the overlapping area is a DroppedItem using class_name or group
+	if area is DroppedItem:
+		# Check if not already in the list (safety)
+		if not area in nearby_items:
+			print("Item entered pickup range:", area.get_item_data().item_id) # Optional debug
+			nearby_items.append(area)
+			# TODO: Show pickup prompt? Highlight item?
 
-func _on_animation_finished():
+func _on_pickup_area_exited(area):
+	if area is DroppedItem:
+		if area in nearby_items:
+			print("Item exited pickup range:", area.get_item_data().item_id) # Optional debug
+			nearby_items.erase(area) # Remove by value
+			# TODO: Hide pickup prompt? Unhighlight item?
+
+func _on_animation_finished(anim_name: String):
 	# Keep existing attack animation logic
 	if current_state == State.ATTACK and animated_sprite.animation.begins_with("attack_"):
 		current_state = State.IDLE_RUN
-		update_animation("idle", last_direction)
+		_update_hand_and_weapon_animation()
 
 func _on_selected_slot_changed(new_index: int, old_index: int, item_data: ItemData):
 	print("Player detected selected slot change. New Item:", item_data)

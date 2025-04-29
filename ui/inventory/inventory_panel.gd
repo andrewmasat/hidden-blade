@@ -1,5 +1,5 @@
 # InventoryPanel.gd
-extends PanelContainer
+extends Control
 
 class_name InventoryPanel
 
