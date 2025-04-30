@@ -6,7 +6,7 @@ extends Control
 
 func _ready():
 	# Hide initially, Inventory signal will show it
-	visible = false
+	#visible = false
 	# Connect to the central inventory signal
 	Inventory.cursor_item_changed.connect(_on_cursor_item_changed)
 	# Ensure initial state matches inventory (likely null)

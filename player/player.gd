@@ -1,7 +1,7 @@
 # player.gd
 extends CharacterBody2D
 
-const DebugItemResource = preload("res://items/weapon_sword_2.tres")
+const DebugItemResource = preload("res://items/consumable_potion_health.tres")
 const DroppedItemScene = preload("res://world/dropped_item.tscn")
 
 # Signals for HUD
@@ -79,43 +79,44 @@ func _physics_process(delta: float):
 
 	# --- Handle Inventory Selection Input (Always Available) ---
 	handle_inventory_input()
+	
+	if is_inventory_open:
+		# Optional: Decelerate player
+		velocity = velocity.move_toward(Vector2.ZERO, speed)
+		move_and_slide()
+		# --- IMPORTANT: Do NOT process gameplay actions ---
+		return # Exit physics process early
 
 	# --- Handle Use Item Input (Only if inventory closed?) ---
-	if not is_inventory_open:
-		if Input.is_action_just_pressed("drop_item"):
-			try_drop_selected_item()
-		if Input.is_action_just_pressed("pickup_item"):
-			try_pickup_nearby_item()
-		if Input.is_action_just_pressed("use_item"):
-			try_use_selected_item()
+	if Input.is_action_just_pressed("drop_item"):
+		try_drop_selected_item()
+	if Input.is_action_just_pressed("pickup_item"):
+		try_pickup_nearby_item()
+	if Input.is_action_just_pressed("use_item"):
+		try_use_selected_item() # Handle use if it's a different button
 
-	if not is_inventory_open:
-		match current_state:
-			State.IDLE_RUN:
-				process_idle_run_state(delta)
-				# Debug Inputs (Keep if needed)
-				if Input.is_action_just_pressed("debug_damage"): take_damage(10)
-				if Input.is_action_just_pressed("debug_heal"): heal(10)
-				if Input.is_action_just_pressed("debug_add_item"):
-					if DebugItemResource:
-						# Important: DUPLICATE the resource so each add gets a unique instance
-						# Otherwise changing quantity of one stack changes all!
-						var new_item_instance = DebugItemResource.duplicate()
-						# Set initial quantity if needed (or handle in add_item)
-						new_item_instance.quantity = 1
-						var success = Inventory.add_item(new_item_instance)
-						if not success: print("Could not add debug item (inventory full?)")
-					else:
-						printerr("Debug item resource not loaded!")
-			State.DASH:
-				process_dash_state(delta)
-			State.ATTACK:
-				process_attack_state(delta)
-		move_and_slide()
-	else:
-		# Optional: Decelerate player if inventory is open?
-		velocity = velocity.move_toward(Vector2.ZERO, speed)
-		move_and_slide() # Apply deceleration
+	match current_state:
+		State.IDLE_RUN:
+			process_idle_run_state(delta)
+			# Debug Inputs (Keep if needed)
+			if Input.is_action_just_pressed("debug_damage"): take_damage(10)
+			if Input.is_action_just_pressed("debug_heal"): heal(10)
+			if Input.is_action_just_pressed("debug_add_item"):
+				if DebugItemResource:
+					# Important: DUPLICATE the resource so each add gets a unique instance
+					# Otherwise changing quantity of one stack changes all!
+					var new_item_instance = DebugItemResource.duplicate()
+					# Set initial quantity if needed (or handle in add_item)
+					new_item_instance.quantity = 1
+					var success = Inventory.add_item(new_item_instance)
+					if not success: print("Could not add debug item (inventory full?)")
+				else:
+					printerr("Debug item resource not loaded!")
+		State.DASH:
+			process_dash_state(delta)
+		State.ATTACK:
+			process_attack_state(delta)
+	move_and_slide()
 
 # --- State Processing ---
 func process_idle_run_state(delta: float):
@@ -172,8 +173,9 @@ func start_dash():
 
 func start_attack():
 	# Keep existing logic
-	var equipped_item = Inventory.get_selected_item()
-	if current_state == State.IDLE_RUN and equipped_item != null:
+	var equipped_item: ItemData = Inventory.get_selected_item()
+
+	if current_state == State.IDLE_RUN and equipped_item != null and equipped_item.item_type == ItemData.ItemType.WEAPON:
 		current_state = State.ATTACK
 		_update_hand_and_weapon_animation()
 		velocity = Vector2.ZERO
@@ -352,6 +354,10 @@ func try_use_selected_item():
 	var selected_item: ItemData = Inventory.get_selected_item()
 
 	if selected_item != null and selected_item is ItemData:
+		if selected_item.item_type == ItemData.ItemType.WEAPON:
+			print("'Use' action pressed, but selected item is a weapon. Attack action handles this.")
+			return # Don't consume consumables etc. if weapon selected and LMB pressed
+
 		match selected_item.item_type:
 			ItemData.ItemType.CONSUMABLE:
 				# Check if the specific consumable CAN be used *before* consuming
@@ -518,4 +524,9 @@ func _on_animation_finished(anim_name: String):
 
 func _on_selected_slot_changed(new_index: int, old_index: int, item_data: ItemData):
 	print("Player detected selected slot change. New Item:", item_data)
+	# --- KEEP CHECK FOR DRAG FLAG ---
+	if Inventory.is_dragging_selected_slot and item_data == null:
+		print("  -> Player: Ignoring equip(null) because selected slot is being dragged.")
+		return
+	# -----------------------------
 	_equip_item(item_data)

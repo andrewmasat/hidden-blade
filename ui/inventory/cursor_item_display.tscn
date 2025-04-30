@@ -3,6 +3,7 @@
 [ext_resource type="Script" uid="uid://dvsa4v8pjmg1m" path="res://ui/inventory/cursor_item_display.gd" id="1_mwoaq"]
 
 [node name="CursorItemDisplay" type="Control"]
+visible = false
 z_index = 150
 clip_contents = true
 custom_minimum_size = Vector2(40, 40)

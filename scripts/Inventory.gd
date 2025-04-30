@@ -19,6 +19,7 @@ var hotbar_slots: Array = [] # Array[ItemData] - ItemData can be Resource, Dicti
 var selected_slot_index: int = 0 : set = set_selected_slot
 var inventory_slots: Array = [] # Array[ItemData] - Main inventory slots
 var cursor_item_data: ItemData = null
+var is_dragging_selected_slot: bool = false
 
 func _ready():
 	# Initialize hotbar
@@ -161,6 +162,10 @@ func remove_item_and_put_on_cursor(area: InventoryArea, index: int) -> ItemData:
 		print("remove_item_and_put_on_cursor: Slot already empty.")
 		return null # Nothing to move
 
+	if area == InventoryArea.HOTBAR and index == selected_slot_index:
+		is_dragging_selected_slot = true
+		print("Inventory: Started dragging selected slot.") # DEBUG
+
 	# Clear the source slot FIRST internally
 	if not _set_item_data(area, index, null):
 		printerr("remove_item_and_put_on_cursor: Failed to clear source slot.")
@@ -175,6 +180,21 @@ func remove_item_and_put_on_cursor(area: InventoryArea, index: int) -> ItemData:
 
 	# Return the item that was moved to the cursor
 	return item_to_move
+
+func remove_item_from_area(area: InventoryArea, index: int) -> ItemData:
+	var slots = _get_slot_array(area)
+	if index < 0 or index >= slots.size(): return null
+
+	var removed_item = slots[index]
+	if removed_item != null:
+		print("Removing item from", area, "[", index, "]")
+		_set_item_data(area, index, null)
+		_emit_change_signal(area, index, null)
+		# Check if it was selected hotbar slot
+		if area == InventoryArea.HOTBAR and index == selected_slot_index:
+			emit_signal("selected_slot_changed", selected_slot_index, selected_slot_index, null)
+		return removed_item
+	return null
 
 func find_first_empty_slot(area: InventoryArea) -> int:
 	var slots = _get_slot_array(area)
@@ -255,13 +275,13 @@ func _set_item_data(area: InventoryArea, index: int, item_data: ItemData):
 	return false
 
 func transfer_to_hotbar(source_area: InventoryArea, source_index: int):
-	if source_area != InventoryArea.MAIN: return # Safety check
-
+	if source_area != InventoryArea.MAIN: print("Invalid source for transfer_to_hotbar"); return # Safety check
 	var source_item: ItemData = get_item_data(source_area, source_index)
-	if source_item == null: return # Nothing to transfer
+	if source_item == null: return
 
 	var item_id = source_item.item_id
 	var target_area = InventoryArea.HOTBAR
+	print("Attempting Transfer: MAIN[", source_index, "] -> HOTBAR") # DEBUG
 
 	# 1. Try to find existing stack in target area
 	var stack_index = find_first_stackable_slot(target_area, item_id)
@@ -288,25 +308,23 @@ func transfer_to_hotbar(source_area: InventoryArea, source_index: int):
 	if get_item_data(source_area, source_index) != null: # Check if item still needs moving
 		var empty_index = find_first_empty_slot(target_area)
 		if empty_index != -1:
-			# Move the remaining item (or the original if no stacking occurred)
+			print(" -> Moving to empty Hotbar slot:", empty_index) # DEBUG
 			var item_to_move = get_item_data(source_area, source_index)
 			_set_item_data(target_area, empty_index, item_to_move)
 			_set_item_data(source_area, source_index, null)
-			# Emit signals for both changed slots
 			_emit_change_signal(target_area, empty_index, item_to_move)
 			_emit_change_signal(source_area, source_index, null)
-			print("Moved remaining item to empty Hotbar[", empty_index, "]")
 		else:
-			print("Hotbar full, cannot transfer item from Main[", source_index, "]")
+			print(" -> Hotbar full, cannot transfer item.") # DEBUG
 
 func transfer_to_main_inventory(source_area: InventoryArea, source_index: int):
-	if source_area != InventoryArea.HOTBAR: return # Safety check
-
+	if source_area != InventoryArea.HOTBAR: print("Invalid source for transfer_to_main"); return # Safety check
 	var source_item: ItemData = get_item_data(source_area, source_index)
-	if source_item == null: return # Nothing to transfer
+	if source_item == null: return
 
 	var item_id = source_item.item_id
 	var target_area = InventoryArea.MAIN
+	print("Attempting Transfer: HOTBAR[", source_index, "] -> MAIN") # DEBUG
 
 	# 1. Try to find existing stack in target area
 	var stack_index = find_first_stackable_slot(target_area, item_id)
@@ -330,14 +348,14 @@ func transfer_to_main_inventory(source_area: InventoryArea, source_index: int):
 	if get_item_data(source_area, source_index) != null:
 		var empty_index = find_first_empty_slot(target_area)
 		if empty_index != -1:
+			print(" -> Moving to empty Main slot:", empty_index) # DEBUG
 			var item_to_move = get_item_data(source_area, source_index)
 			_set_item_data(target_area, empty_index, item_to_move)
 			_set_item_data(source_area, source_index, null)
 			_emit_change_signal(target_area, empty_index, item_to_move)
 			_emit_change_signal(source_area, source_index, null)
-			print("Moved remaining item to empty Main[", empty_index, "]")
 		else:
-			print("Main Inventory full, cannot transfer item from Hotbar[", source_index, "]")
+			print(" -> Main Inventory full, cannot transfer item.") # DEBUG
 
 func get_cursor_item() -> ItemData:
 	return cursor_item_data
@@ -364,41 +382,46 @@ func clear_cursor_item() -> ItemData:
 # --- Split Stack Logic ---
 # Called when a slot is right-clicked
 func split_stack_to_cursor(area: InventoryArea, index: int):
-	# Cannot split if already holding an item
-	if cursor_item_data != null:
+	if cursor_item_data != null: # Cannot split if already holding
 		print("Inventory: Cannot split, already holding item on cursor.")
 		return
 
 	var source_item: ItemData = get_item_data(area, index)
-
-	# Check if splittable
-	if source_item == null or source_item.quantity <= 1:
+	if source_item == null or source_item.quantity <= 1: # Check if splittable
 		print("Inventory: Cannot split empty slot or stack of 1.")
 		return
 
-	# Calculate split quantities
-	var quantity_to_move = ceil(float(source_item.quantity) / 2.0) # Give cursor slightly more if odd
+	# ... (calculate quantities) ...
+	var quantity_to_move = ceil(float(source_item.quantity) / 2.0)
 	var quantity_remaining = source_item.quantity - quantity_to_move
 
 	# Decrease original stack quantity
 	source_item.quantity = quantity_remaining
+	print("  -> Source item qty reduced to:", quantity_remaining) # Debug
 
-	# Create NEW stack for cursor (essential to duplicate!)
-	var new_cursor_stack: ItemData = source_item.duplicate() # Duplicate the resource
+	# Create NEW stack for cursor (duplic==ate!)
+	var new_cursor_stack: ItemData = source_item.duplicate()
 	new_cursor_stack.quantity = quantity_to_move
+	print("  -> New cursor stack created. Qty:", quantity_to_move) # Debug
 
-	# Put the new stack on the cursor
-	set_cursor_item(new_cursor_stack)
+	# --- Put the new stack on the cursor ---
+	set_cursor_item(new_cursor_stack) # This emits cursor_item_changed
+	# Add extra print AFTER setting:
+	print("  -> Cursor item is now:", get_cursor_item()) # Debug verification
 
 	# Update the original slot's UI
 	_emit_change_signal(area, index, source_item)
+
+	var hud = get_tree().get_first_node_in_group("HUD")
+	if hud and hud.inventory_panel and hud.inventory_panel.grid_container:
+		hud.inventory_panel.grid_container.grab_focus()
+		print("  -> Attempted grab_focus on grid after split.") # Debug
 
 
 # --- Place Cursor Item Logic ---
 # Called when a slot is left-clicked while holding an item
 func place_cursor_item_on_slot(target_area: InventoryArea, target_index: int):
 	if cursor_item_data == null:
-		# Should not happen if called correctly, but safety check
 		printerr("Inventory: place_cursor_item called with no item on cursor!")
 		return
 
@@ -406,9 +429,11 @@ func place_cursor_item_on_slot(target_area: InventoryArea, target_index: int):
 
 	# Case 1: Target slot is empty
 	if target_item == null:
-		_set_item_data(target_area, target_index, cursor_item_data)
-		_emit_change_signal(target_area, target_index, cursor_item_data)
-		clear_cursor_item() # Cursor is now empty
+		var item_placed = cursor_item_data # Hold reference before clearing cursor
+		if _set_item_data(target_area, target_index, item_placed): # Set data first
+			_emit_change_signal(target_area, target_index, item_placed) # THEN emit signal (triggers selection check if needed)
+			clear_cursor_item() # Cursor is now empty
+		else: printerr("Place Error: Failed to set target slot.")
 
 	# Case 2: Target slot has SAME item type (try merging)
 	elif target_item.item_id == cursor_item_data.item_id:
@@ -419,24 +444,49 @@ func place_cursor_item_on_slot(target_area: InventoryArea, target_index: int):
 			target_item.quantity += amount_to_transfer
 			cursor_item_data.quantity -= amount_to_transfer
 			print("  -> Transferred ", amount_to_transfer)
-			_emit_change_signal(target_area, target_index, target_item) # Update target slot UI
-			# Check if cursor item is now empty
+			_emit_change_signal(target_area, target_index, target_item) # Emit for target (triggers selection check if needed)
+
 			if cursor_item_data.quantity <= 0:
 				clear_cursor_item() # Clear cursor if fully merged
 			else:
-				# Update cursor UI if partially merged
-				emit_signal("cursor_item_changed", cursor_item_data)
-		else:
-			print("  -> Target stack full, cannot merge.")
-			# Optional: Swap if merging failed? Or just do nothing? Let's do nothing for now.
+				emit_signal("cursor_item_changed", cursor_item_data) # Update cursor UI only
+		# else: # Target stack full, do nothing
 
 	# Case 3: Target slot has DIFFERENT item type (swap)
 	else:
-		_set_item_data(target_area, target_index, cursor_item_data) # Put cursor item in slot
-		_emit_change_signal(target_area, target_index, cursor_item_data) # Update slot UI
-		set_cursor_item(target_item) # Put slot item onto cursor, updates cursor UI via signal
+		print("Place Cursor: Target different. Swapping...")
+		var item_that_was_in_slot = target_item
+		var item_that_was_on_cursor = cursor_item_data
+		# IMPORTANT: Perform the swap using _set_item_data then emit signals AFTERWARDS
+		if _set_item_data(target_area, target_index, item_that_was_on_cursor): # Put cursor item in slot first
+			# Set cursor item BEFORE emitting slot signal, otherwise cur	sor state is wrong for listeners
+			set_cursor_item(item_that_was_in_slot) # Put slot item onto cursor (emits cursor changed)
+			# NOW emit signal for the slot change
+			_emit_change_signal(target_area, target_index, item_that_was_on_cursor) # Triggers selection check if needed
+		else: printerr("Swap Error: Failed setting target slot.")
+		
+	var was_dragging_selected = is_dragging_selected_slot # Store before resetting
+	if is_dragging_selected_slot:
+		print("Inventory: Resetting is_dragging_selected_slot flag after placement.") # DEBUG
+		is_dragging_selected_slot = false
+
+	# If we WERE dragging the selected slot, we need to ensure the player
+	# gets the FINAL state of that slot now that the drag is over.
+	if was_dragging_selected:
+		print("  -> Forcing selection update check after drag end.") # DEBUG
+		force_update_selected_slot_signal()
+
+func force_update_selected_slot_signal():
+	# Re-emit the signal with the current state
+	print("Inventory: Forcing selected_slot_changed signal update.") # Debug
+	var current_selected_item = get_item_data(InventoryArea.HOTBAR, selected_slot_index)
+	emit_signal("selected_slot_changed", selected_slot_index, selected_slot_index, current_selected_item)
 
 func move_item(source_area: InventoryArea, source_index: int, target_area: InventoryArea, target_index: int):
+	# Prevent dropping onto itself
+	if source_area == target_area and source_index == target_index:
+		print("  -> Abort: Source and target are the same.") # DEBUG
+		return
 	# Prevent dropping onto itself (no action needed)
 	if source_area == target_area and source_index == target_index:
 		return
@@ -502,25 +552,39 @@ func _perform_swap(area1: InventoryArea, index1: int, item1: ItemData, area2: In
 	else: printerr("Swap Error: Failed setting slot 2.")
 
 func _check_and_update_selected_slot(s_area, s_idx, t_area, t_idx, final_s_item, final_t_item):
+	print("Checking selection update: s_area=", s_area, " s_idx=", s_idx, " t_area=", t_area, " t_idx=", t_idx, " | current_selected=", selected_slot_index) # DEBUG
 	var selection_changed = false
 	var new_selected_item = null
 
 	# Check if the original source was the selected hotbar slot
 	if s_area == InventoryArea.HOTBAR and s_idx == selected_slot_index:
 		selection_changed = true
-		new_selected_item = final_s_item # Item that ended up in the source slot
+		new_selected_item = final_s_item # Item that ended up in the source slot (should be null in this case)
+		print("  -> Source was selected slot. New item for selected slot:", new_selected_item) # DEBUG
 
 	# Check if the target was the selected hotbar slot (overwrites source check if true)
 	if t_area == InventoryArea.HOTBAR and t_idx == selected_slot_index:
 		selection_changed = true
 		new_selected_item = final_t_item # Item that ended up in the target slot
+		print("  -> Target was selected slot. New item for selected slot:", new_selected_item) # DEBUG
 
 	# If the selection was affected, emit the signal
 	if selection_changed:
-		emit_signal("selected_slot_changed", selected_slot_index, selected_slot_index, new_selected_item)
+		print("  -> Selection WAS affected. Emitting selected_slot_changed for index", selected_slot_index, " with item:", new_selected_item) # DEBUG
+		emit_signal("selected_slot_changed", selected_slot_index, selected_slot_index, new_selected_item) # Use index twice as old/new index didn't change
+	#else: # Debug
+	#	print("  -> Selection NOT affected.") # DEBUG
 
 func _emit_change_signal(area: InventoryArea, index: int, item_data: ItemData): # Ensure ItemData type hint
+	print("Emitting change signal for:", area, "[", index, "]") # Debug
 	if area == InventoryArea.HOTBAR:
 		emit_signal("inventory_changed", index, item_data)
+		# --- ADD SELECTION CHECK HERE ---
+		# If the change happened TO the currently selected slot, we MUST update the player equip state.
+		if index == selected_slot_index:
+			print("  -> Change occurred in selected hotbar slot. Re-emitting selected_slot_changed.") # Debug
+			# Emit the main signal the player listens to
+			emit_signal("selected_slot_changed", selected_slot_index, selected_slot_index, item_data)
+		# -------------------------------
 	elif area == InventoryArea.MAIN:
 		emit_signal("main_inventory_changed", index, item_data)

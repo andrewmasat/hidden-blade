@@ -1,167 +1,201 @@
 # InventorySlot.gd
-extends Button
+# Represents a single slot UI element within an inventory grid or hotbar.
+# Handles displaying item info, user interaction (clicks, right-clicks),
+# and initiating/receiving drag-and-drop operations related to the Inventory singleton.
+extends Button # Inheriting Button provides click signals and focus handling
 
 class_name InventorySlot
 
-const DOUBLE_CLICK_THRESHOLD_MSEC = 300
+# Time threshold in milliseconds to detect a double-click.
+const DOUBLE_CLICK_THRESHOLD_MSEC: int = 300
 
-@onready var icon_rect = $ItemIcon
-@onready var quantity_label = $QuantityLabel
+# --- Node References ---
+# Assumes ItemIcon and QuantityLabel are direct children named this way in the scene.
+@onready var icon_rect: TextureRect = $ItemIcon
+@onready var quantity_label: Label = $QuantityLabel
+# Assuming the direct parent is always the GridContainer managing this slot.
+# Becomes unreliable if the hierarchy changes. Consider alternatives if needed.
+@onready var grid_container: Container = get_parent() as Container
+# Optional: Get HUD reference if needed for context checks (like panel visibility).
+# Use get_tree().get_first_node_in_group("HUD") for reliability across scenes.
 @onready var hud = get_tree().get_first_node_in_group("HUD") if get_tree() else null
 
-@export var drag_preview_size := Vector2(40, 40)
 
-# Optional: Store the index this slot represents
+# --- Exported Variables ---
+# Currently unused as we removed the official drag preview. Keep if needed later.
+# @export var drag_preview_size := Vector2(40, 40)
+
+
+# --- Slot State ---
+# Index of this slot within its inventory area. Must be set externally.
 var slot_index: int = -1
+# The area this slot belongs to (e.g., MAIN inventory or HOTBAR). Must be set externally.
 var inventory_area: Inventory.InventoryArea = Inventory.InventoryArea.MAIN
+# Timestamp of the last potential first click for double-click detection.
 var last_click_time_msec: int = 0
 
-func _ready():
-	# Safety check for HUD reference
-	if not hud:
-		print("InventorySlot Warning: HUD node not found in group 'HUD'. Double-click transfer from hotbar might not work.")
 
-func display_item(item_data: ItemData): # Use ItemData type hint
-	if item_data != null and item_data is ItemData: # Check type
-		icon_rect.texture = item_data.texture # Get texture from ItemData
-		icon_rect.visible = true
-		# Display quantity if > 1 (or always if > 0, your choice)
-		if item_data.quantity > 1:
-			quantity_label.text = str(item_data.quantity)
-			quantity_label.visible = true
-		else:
-			quantity_label.text = ""
-			quantity_label.visible = false
+# Called when the node is ready. Connects signals.
+func _ready() -> void:
+	# Connect the Button's built-in signal for completed clicks.
+	self.pressed.connect(_on_InventorySlot_pressed)
+
+	# Optional safety check for HUD reference if needed by _handle_double_click
+	if not hud and inventory_area == Inventory.InventoryArea.HOTBAR:
+		print("InventorySlot Warning [Hotbar ", slot_index, "]: HUD node not found. Double-click transfer to main inventory might not work.")
+
+
+# Updates the slot's visual display based on ItemData.
+func display_item(item_data: ItemData) -> void:
+	if item_data != null and item_data is ItemData:
+		# Display item texture
+		if is_instance_valid(icon_rect):
+			icon_rect.texture = item_data.texture
+			icon_rect.visible = true
+		# Display quantity label only if item stacks and quantity > 1
+		if is_instance_valid(quantity_label):
+			if item_data.max_stack_size > 1 and item_data.quantity > 1:
+				quantity_label.text = str(item_data.quantity)
+				quantity_label.visible = true
+			else:
+				quantity_label.text = ""
+				quantity_label.visible = false
 	else:
+		# Clear display if item_data is null
 		clear()
 
-func clear():
-	icon_rect.texture = null
-	icon_rect.visible = false
-	quantity_label.text = ""
-	quantity_label.visible = false
 
-func _gui_input(event: InputEvent):
-	if event is InputEventMouseButton:
-		# --- Left Click ---
-		if event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
-			# Check if holding an item on cursor FIRST
-			if Inventory.get_cursor_item() != null:
-				# Try to place the item here
-				Inventory.place_cursor_item_on_slot(inventory_area, slot_index)
-				accept_event() # Consume the click event
-				return # Don't process double-click or drag start
+# Clears the item texture and quantity label.
+func clear() -> void:
+	if is_instance_valid(icon_rect):
+		icon_rect.texture = null
+		icon_rect.visible = false
+	if is_instance_valid(quantity_label):
+		quantity_label.text = ""
+		quantity_label.visible = false
 
-			# --- If not placing cursor item, check for double-click ---
-			var current_time_msec = Time.get_ticks_msec()
-			var time_diff = current_time_msec - last_click_time_msec
-			if time_diff < DOUBLE_CLICK_THRESHOLD_MSEC:
-				# Double-click detected!
-				_handle_double_click() # Handles transfer logic
-				last_click_time_msec = 0 # Reset time
-				accept_event() # Consume the event
-			else:
-				# First click (or too slow), record time for potential double-click later
-				last_click_time_msec = current_time_msec
-				# DO NOT accept_event() here, let DnD check it
 
-		# --- Right Click ---
-		elif event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
-			# Try to split the stack in this slot
+# Handles specific GUI input events, primarily right-clicks and the first part of double-clicks.
+func _gui_input(event: InputEvent) -> void:
+	# Handle Right-Click for splitting stacks
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
+		if Inventory.get_cursor_item() == null: # Only allow split if cursor is empty
+			print(" -> Slot [", slot_index, "] Right-click detected for split.") # Debug
 			Inventory.split_stack_to_cursor(inventory_area, slot_index)
-			accept_event() # Consume the right-click
+			accept_event() # Consume the right-click event
+		return # Don't process further
 
-func _handle_double_click():
-	# Check type just in case
+	# Handle Left-Click Press for recording double-click start time
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+		# Check if we are placing an item already on the cursor. If so, handle it immediately.
+		if Inventory.get_cursor_item() != null:
+			print(" -> Slot [", slot_index, "] Processing immediate place click (pressed) from _gui_input.") # Debug
+			Inventory.place_cursor_item_on_slot(inventory_area, slot_index)
+			accept_event()
+			return # Don't record click time etc. if placing
+
+		# If cursor is empty, this might be the first click of a double-click or drag start.
+		# Record the time but DO NOT consume the event. Let the Button signal handle completion/drag.
+		last_click_time_msec = Time.get_ticks_msec()
+		print(" -> Slot [", slot_index, "] First click press detected. Recorded time. Allowing drag/press signal.") # Debug
+
+
+# Called AFTER a full Press+Release click completes on this Button node.
+# Handles placing items from cursor or double-click actions.
+func _on_InventorySlot_pressed() -> void:
+	print("Slot [", slot_index, "] _on_InventorySlot_pressed signal triggered.") # Debug
+
+	# Check cursor state first. If an item is held, this click places it.
+	var item_on_cursor = Inventory.get_cursor_item()
+	if item_on_cursor != null:
+		print("  -> Slot [", slot_index, "] Processing place click via pressed signal.") # Debug
+		Inventory.place_cursor_item_on_slot(inventory_area, slot_index)
+		# Placement logic handles cursor clearing and signals.
+		return # Action completed
+
+	# If cursor was empty, check if this completes a double-click.
+	var current_time_msec = Time.get_ticks_msec()
+	var time_diff = current_time_msec - last_click_time_msec
+	if time_diff < DOUBLE_CLICK_THRESHOLD_MSEC:
+		# Ensure this wasn't the *first* click by checking if time was recorded recently
+		if last_click_time_msec != 0:
+			print("  -> Slot [", slot_index, "] Double-click completed.") # Debug
+			_handle_double_click()
+			last_click_time_msec = 0 # Reset time after handling
+	# else: # Single click completed on an empty slot or slot with item (cursor was empty)
+		# No action needed here for single click completion. Drag starts on press+hold.
+		# last_click_time_msec was already updated by _gui_input on the press.
+		# print("  -> Slot [", slot_index, "] Single click completed (or second click too slow).") # Debug
+
+
+# Handles the logic for transferring items on double-click.
+func _handle_double_click() -> void:
 	var item_data: ItemData = Inventory.get_item_data(inventory_area, slot_index)
-	if not item_data is ItemData: return # Cannot transfer null or wrong type
+	if not item_data is ItemData: return # Cannot transfer empty slot
+
+	print("Handling double click for slot:", slot_index, "Area:", inventory_area) # Debug
 
 	if inventory_area == Inventory.InventoryArea.MAIN:
+		print(" -> Transferring MAIN to HOTBAR")
 		Inventory.transfer_to_hotbar(inventory_area, slot_index)
 	elif inventory_area == Inventory.InventoryArea.HOTBAR:
-		var is_panel_open = false
-		if hud and hud.has_method("is_inventory_open"):
-			is_panel_open = hud.is_inventory_open()
+		var is_panel_open = hud and hud.has_method("is_inventory_open") and hud.is_inventory_open()
 		if is_panel_open:
+			print(" -> Transferring HOTBAR to MAIN")
 			Inventory.transfer_to_main_inventory(inventory_area, slot_index)
-		# else: print("Cannot transfer from hotbar, panel closed")
+		else:
+			print(" -> Cannot transfer from hotbar, panel closed")
+
 
 # --- Drag and Drop Methods ---
 
+# Called by the engine when a drag is initiated FROM this control.
 func _get_drag_data(at_position: Vector2):
-	# Prevent drag if holding item on cursor OR if double-click just happened
-	if Inventory.get_cursor_item() != null: return null
+	# Prevent starting a drag if an item is already held on the cursor.
+	if Inventory.get_cursor_item() != null:
+		print("Slot [", slot_index, "] _get_drag_data: Cannot start drag, item on cursor.") # Debug
+		return null
 
-	# Get item data from the central inventory
-	var item_data: ItemData = Inventory.get_item_data(inventory_area, slot_index)
+	# Get the item currently in this slot.
+	var item_in_slot = Inventory.get_item_data(inventory_area, slot_index)
 
-	# Only allow dragging if there's an item
-	if item_data != null:
+	# Only proceed if there's an item to drag.
+	if item_in_slot != null:
+		print("Slot [", slot_index, "] _get_drag_data: Starting drag.") # Debug
+		# Move the item from the slot to the inventory's cursor state immediately.
 		var item_put_on_cursor = Inventory.remove_item_and_put_on_cursor(inventory_area, slot_index)
 
+		# If moving to cursor failed for some reason, abort the drag.
 		if item_put_on_cursor == null:
-			printerr("_get_drag_data: Failed to move item from slot to cursor before drag.")
-			return null # Abort drag if removal failed
+			printerr("Slot [", slot_index, "] _get_drag_data: Failed to move item to cursor.")
+			return null
 
-		# Prepare data package for drop target
-		var drag_data = {
-			"source_area": inventory_area,
-			"source_index": slot_index,
-			"item_data": item_data
-		}
-
-		# Create drag preview (simple icon)
-		var preview_container = Control.new()
-		preview_container.size = drag_preview_size
-		preview_container.clip_contents = false
-		preview_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
-
-		var preview_icon = TextureRect.new()
-		preview_icon.texture = item_data.texture
-		preview_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		preview_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		# Let the icon fill the container
-		preview_icon.size = preview_container.size
-		preview_icon.position = Vector2.ZERO # Position at top-left of container
-		preview_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		preview_container.add_child(preview_icon)
-
-		if item_data.quantity > 1:
-			var preview_label = Label.new()
-			preview_label.text = str(item_data.quantity)
-
-			# Set label size to match container for alignment purposes
-			preview_label.size = preview_container.size
-
-			# Align text to bottom-right within the label's bounds
-			preview_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-			preview_label.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
-
-			# --- Styling (Adjust as needed) ---
-			preview_label.add_theme_font_size_override("font_size", 14) # Adjust size as needed
-			preview_label.add_theme_color_override("font_color", Color.WHITE)
-			preview_label.add_theme_color_override("font_shadow_color", Color.BLACK)
-			preview_label.add_theme_color_override("font_outline_color", Color.BLACK)
-			preview_label.add_theme_constant_override("outline_offset_y", 2)
-			preview_label.add_theme_constant_override("outline_size", 5)
-			preview_label.add_theme_constant_override("shadow_outline_size", 1)
-			# --- End Styling ---
-
-			preview_container.add_child(preview_label)
-
-		preview_container.z_index = 100
-		set_drag_preview(preview_container)
-		return drag_data
+		# Return minimal data just to initiate the drag state.
+		# The actual item state is now managed via the cursor.
+		# Rely on CursorItemDisplay for visual feedback during drag.
+		return { "drag_type": "inventory_item_on_cursor" }
 	else:
-		print("Cannot drag empty slot: ", Inventory.InventoryArea.keys()[inventory_area], "[", slot_index, "]")
-		return null # No drag starts if slot is empty
+		# Cannot drag an empty slot.
+		# print("Slot [", slot_index, "] _get_drag_data: Slot is empty, cannot drag.") # Debug
+		return null
 
+
+# Called by the engine to check if data from a drag operation can be dropped ONTO this control.
 func _can_drop_data(at_position: Vector2, data) -> bool:
-	if Inventory.get_cursor_item() == null:
-		# Cannot drop anything if cursor is empty (shouldn't happen if drag started correctly)
-		return false
-	return true
+	# Accept the drop only if an item is currently held on the cursor
+	# AND the drag data payload indicates it's the correct type of drag operation.
+	var can_drop = Inventory.get_cursor_item() != null and \
+				   data is Dictionary and \
+				   data.get("drag_type") == "inventory_item_on_cursor"
+	# print("Slot [", slot_index, "] _can_drop_data: Check result:", can_drop) # Debug
+	return can_drop
 
-func _drop_data(at_position: Vector2, data):
-	# Simple swap logic (using the potentially updated move_item)
+
+# Called by the engine when a drag operation successfully drops data ONTO this control.
+func _drop_data(at_position: Vector2, data) -> void:
+	# The item to be placed is already on the cursor (moved there by _get_drag_data).
+	# Call the Inventory function to handle placing/swapping/merging at this slot's location.
+	print("Slot [", slot_index, "] _drop_data: Calling place_cursor_item_on_slot.") # Debug
 	Inventory.place_cursor_item_on_slot(inventory_area, slot_index)
+	# The Inventory function handles clearing the cursor and emitting necessary signals.
+	accept_event() # Consume the drop event so it doesn't propagate further.

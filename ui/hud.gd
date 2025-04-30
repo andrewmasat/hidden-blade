@@ -5,8 +5,8 @@ const InventorySlotScene = preload("res://ui/inventory/inventory_slot.tscn")
 
 # Node References (Use unique names!)
 @onready var health_bar = $UIContainer/MarginContainer/VBoxContainer/HealthBar # % shorthand requires Godot 4 and unique names in the scene tree branch
-@onready var hotbar_container = $UIContainer/MarginContainer/VBoxContainer/HotbarContainer
-@onready var selection_indicator = $UIContainer/MarginContainer/VBoxContainer/HotbarContainer/SelectionIndicator
+@onready var hotbar_container = $UIContainer/MarginContainer/VBoxContainer/Hotbar/HotbarContainer
+@onready var selection_indicator = $UIContainer/MarginContainer/VBoxContainer/Hotbar/SelectionIndicator
 @onready var inventory_panel = $UIContainer/InventoryPanel
 
 # Keep track of references to slot elements for easier updates
@@ -122,7 +122,8 @@ func _on_hotbar_inventory_changed(slot_index: int, item_data: ItemData): # Add I
 	if slot_index >= 0 and slot_index < hotbar_slot_instances.size():
 		var slot_node = hotbar_slot_instances[slot_index]
 		if slot_node and slot_node.has_method("display_item"):
-			slot_node.display_item(item_data) # Pass ItemData or null
+			slot_node.display_item(item_data)
+			slot_node.queue_redraw() # <--- ADD THIS
 
 func _on_selected_slot_changed(new_index: int, old_index: int, item_data):
 	_update_selection_indicator(new_index)
