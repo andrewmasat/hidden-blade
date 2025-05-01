@@ -1,7 +1,7 @@
 # HUD.gd
 extends CanvasLayer
 
-const InventorySlotScene = preload("res://ui/inventory/inventory_slot.tscn")
+const InventorySlotScene = preload("res://ui/inventory/InventorySlot.tscn")
 
 # Node References (Use unique names!)
 @onready var health_bar = $UIContainer/MarginContainer/VBoxContainer/HealthBar # % shorthand requires Godot 4 and unique names in the scene tree branch

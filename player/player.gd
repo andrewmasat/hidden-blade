@@ -2,7 +2,7 @@
 extends CharacterBody2D
 
 const DebugItemResource = preload("res://items/consumable_potion_health.tres")
-const DroppedItemScene = preload("res://world/dropped_item.tscn")
+const DroppedItemScene = preload("res://world/DroppedItem.tscn")
 
 # Signals for HUD
 signal health_changed(current_health: float, max_health: float)
@@ -41,6 +41,7 @@ var current_state: State = State.IDLE_RUN
 var last_direction: Vector2 = Vector2.DOWN
 var equipped_item_data: ItemData = null
 var nearby_items: Array[DroppedItem] = []
+var is_transitioning: bool = false
 
 # Node References
 @onready var animated_sprite = $AnimatedSprite2D
@@ -155,6 +156,13 @@ func process_dash_state(delta: float):
 func process_attack_state(delta: float):
 	velocity = Vector2.ZERO
 	pass # State ends on animation finish
+
+func set_transitioning_state(state: bool):
+	is_transitioning = state
+	print("Player transitioning state set to:", state) # Debug
+
+func is_currently_transitioning() -> bool:
+	return is_transitioning
 
 # --- Action Start Functions ---
 func start_dash():

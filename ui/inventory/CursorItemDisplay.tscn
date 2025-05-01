@@ -1,6 +1,6 @@
 [gd_scene load_steps=2 format=3 uid="uid://l1ltos0l2n54"]
 
-[ext_resource type="Script" uid="uid://dvsa4v8pjmg1m" path="res://ui/inventory/cursor_item_display.gd" id="1_mwoaq"]
+[ext_resource type="Script" uid="uid://dvsa4v8pjmg1m" path="res://ui/inventory/CursorItemDisplay.gd" id="1_mwoaq"]
 
 [node name="CursorItemDisplay" type="Control"]
 visible = false

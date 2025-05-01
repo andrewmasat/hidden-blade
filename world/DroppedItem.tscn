@@ -1,6 +1,6 @@
 [gd_scene load_steps=4 format=3 uid="uid://bed5ijmikyryd"]
 
-[ext_resource type="Script" uid="uid://gsl75p7wrttt" path="res://world/dropped_item.gd" id="1_sn3gv"]
+[ext_resource type="Script" uid="uid://gsl75p7wrttt" path="res://world/DroppedItem.gd" id="1_sn3gv"]
 [ext_resource type="Texture2D" uid="uid://bs3pqk2i5iih8" path="res://assets/Items/Food/Meat.png" id="2_txuh2"]
 
 [sub_resource type="CircleShape2D" id="CircleShape2D_a64hr"]

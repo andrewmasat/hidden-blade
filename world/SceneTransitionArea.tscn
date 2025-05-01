@@ -1,0 +1,16 @@
+[gd_scene load_steps=3 format=3 uid="uid://cqxejvk3jwb6d"]
+
+[ext_resource type="Script" uid="uid://cakdsjpmmatyi" path="res://world/SceneTransitionArea.gd" id="1_ksfgf"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_u77cm"]
+size = Vector2(200, 20)
+
+[node name="SceneTransitionArea" type="Area2D"]
+collision_layer = 512
+collision_mask = 2
+script = ExtResource("1_ksfgf")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("RectangleShape2D_u77cm")
+
+[connection signal="body_entered" from="." to="." method="_on_body_entered"]

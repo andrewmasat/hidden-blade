@@ -8,7 +8,7 @@ class_name InventoryPanel
 signal close_requested
 
 # Preload the scene for individual inventory slots. Adjust path if necessary.
-const InventorySlotScene = preload("res://ui/inventory/inventory_slot.tscn")
+const InventorySlotScene = preload("res://ui/inventory/InventorySlot.tscn")
 
 # --- Node References ---
 # Using shorter paths assumes this script is attached to InventoryPanel node

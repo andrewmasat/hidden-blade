@@ -1,13 +1,14 @@
-[gd_scene load_steps=9 format=3 uid="uid://5jla8f64s8f"]
+[gd_scene load_steps=10 format=3 uid="uid://5jla8f64s8f"]
 
-[ext_resource type="Script" uid="uid://b56rv0tql5rd7" path="res://ui/hud.gd" id="1_1v5rv"]
+[ext_resource type="Script" uid="uid://b56rv0tql5rd7" path="res://ui/Hud.gd" id="1_1v5rv"]
 [ext_resource type="Texture2D" uid="uid://cd7nrnoa5d2g4" path="res://assets/Ui/Receptacle/LifeBarMiniUnder.png" id="1_en2x2"]
 [ext_resource type="Texture2D" uid="uid://dlapvfa2ithyt" path="res://assets/Ui/Receptacle/LifeBarMiniProgress.png" id="2_1v5rv"]
-[ext_resource type="Script" uid="uid://chjmtiv3bk3v7" path="res://ui/ui_container.gd" id="2_srpbi"]
-[ext_resource type="PackedScene" uid="uid://p5rcch5nsaa1" path="res://ui/inventory/inventory_slot.tscn" id="4_1v5rv"]
+[ext_resource type="Script" uid="uid://chjmtiv3bk3v7" path="res://ui/UIContainer.gd" id="2_srpbi"]
+[ext_resource type="PackedScene" uid="uid://p5rcch5nsaa1" path="res://ui/inventory/InventorySlot.tscn" id="4_1v5rv"]
 [ext_resource type="Texture2D" uid="uid://d3ohffxbqnpdn" path="res://assets/Ui/Receptacle/Receptacle Sphere/Select.png" id="5_spcu4"]
-[ext_resource type="PackedScene" uid="uid://cc141b611ya43" path="res://ui/inventory/inventory_panel.tscn" id="6_1v5rv"]
-[ext_resource type="PackedScene" uid="uid://l1ltos0l2n54" path="res://ui/inventory/cursor_item_display.tscn" id="7_q43x7"]
+[ext_resource type="PackedScene" uid="uid://cc141b611ya43" path="res://ui/inventory/InventoryPanel.tscn" id="6_1v5rv"]
+[ext_resource type="PackedScene" uid="uid://l1ltos0l2n54" path="res://ui/inventory/CursorItemDisplay.tscn" id="7_q43x7"]
+[ext_resource type="Texture2D" uid="uid://coaf760ho47pk" path="res://assets/Ui/Input/Keyboard/KeyB.png" id="8_spcu4"]
 
 [node name="HUD" type="CanvasLayer" groups=["HUD"]]
 script = ExtResource("1_1v5rv")
@@ -24,6 +25,8 @@ script = ExtResource("2_srpbi")
 
 [node name="InventoryPanel" parent="UIContainer" instance=ExtResource("6_1v5rv")]
 layout_mode = 1
+offset_top = -121.0
+offset_bottom = 121.0
 
 [node name="MarginContainer" type="MarginContainer" parent="UIContainer"]
 layout_mode = 1
@@ -115,5 +118,26 @@ layout_mode = 2
 
 [node name="HotbarSlot8" parent="UIContainer/MarginContainer/VBoxContainer/Hotbar/HotbarContainer" instance=ExtResource("4_1v5rv")]
 layout_mode = 2
+
+[node name="KeyboardShortcuts" type="VBoxContainer" parent="UIContainer/MarginContainer/VBoxContainer/Hotbar"]
+layout_mode = 1
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -101.0
+offset_top = -40.0
+grow_horizontal = 0
+grow_vertical = 0
+alignment = 2
+
+[node name="Backpack" type="Button" parent="UIContainer/MarginContainer/VBoxContainer/Hotbar/KeyboardShortcuts"]
+layout_mode = 2
+text = "ackpack"
+icon = ExtResource("8_spcu4")
+flat = true
+alignment = 0
+expand_icon = true
 
 [node name="CursorItemDisplay" parent="." instance=ExtResource("7_q43x7")]

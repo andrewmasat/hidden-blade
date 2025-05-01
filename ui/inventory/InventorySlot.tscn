@@ -1,6 +1,6 @@
 [gd_scene load_steps=2 format=3 uid="uid://p5rcch5nsaa1"]
 
-[ext_resource type="Script" uid="uid://67yljjf2c3kw" path="res://ui/inventory/inventory_slot.gd" id="1_nktrt"]
+[ext_resource type="Script" uid="uid://67yljjf2c3kw" path="res://ui/inventory/InventorySlot.gd" id="1_nktrt"]
 
 [node name="InventorySlot" type="Button"]
 clip_contents = true
