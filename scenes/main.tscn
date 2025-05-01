@@ -5,6 +5,9 @@
 
 [node name="Main" type="Node2D"]
 
-[node name="Player" parent="." instance=ExtResource("1_o5qli")]
+[node name="WorldYSort" type="Node2D" parent="."]
+y_sort_enabled = true
+
+[node name="Player" parent="WorldYSort" instance=ExtResource("1_o5qli")]
 
 [node name="HUD" parent="." instance=ExtResource("2_0wfyh")]

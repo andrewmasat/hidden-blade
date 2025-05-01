@@ -243,23 +243,22 @@ func handle_world_drop(item_data_dropped: ItemData):
 			printerr("  -> Failed to add dropped item back to inventory!")
 		return
 
-	var dropped_item_instance = DroppedItemScene.instantiate()
-
 	# Determine drop position (slightly in front of player)
 	var drop_offset = last_direction.normalized() * 25.0
 	if drop_offset == Vector2.ZERO: drop_offset = Vector2(25, 0)
-	var drop_position = global_position + drop_offset
+	var initial_drop_position = global_position + drop_offset
+
+	var final_drop_position = find_non_overlapping_drop_position(initial_drop_position)
 
 	# Add to scene tree (player's parent)
+	var dropped_item_instance = DroppedItemScene.instantiate()
 	var main_level = get_parent()
 	if is_instance_valid(main_level):
 		main_level.add_child(dropped_item_instance)
-		dropped_item_instance.global_position = drop_position
+
 		# Initialize the dropped item with data
 		if dropped_item_instance.has_method("initialize"):
-			# IMPORTANT: We pass the data directly. DroppedItem should handle it.
-			# No need to duplicate here unless initialize modifies the original unexpectedly.
-			dropped_item_instance.initialize(item_data_dropped)
+			dropped_item_instance.initialize(item_data_dropped, final_drop_position)
 		else:
 			printerr("DroppedItem instance missing initialize method!")
 			dropped_item_instance.queue_free()
@@ -302,6 +301,42 @@ func get_target_animation() -> String:
 	# Construct the animation name (e.g., "run_right", "idle_up")
 	return action_prefix + "_" + direction_suffix
 
+func find_non_overlapping_drop_position(target_pos: Vector2, max_attempts: int = 5, check_radius: float = 8.0, spread_distance: float = 10.0) -> Vector2:
+	var space_state = get_world_2d().direct_space_state
+	var query = PhysicsShapeQueryParameters2D.new()
+	# Use a small circle shape for checking overlap
+	var check_shape = CircleShape2D.new()
+	check_shape.radius = check_radius
+	query.shape = check_shape
+	# Configure collision mask to ONLY check against other DroppedItems (e.g., set their layer/mask)
+	#query.collision_mask = "Items"
+	query.collide_with_areas = true # Check Area2D
+	query.collide_with_bodies = false
+
+	var current_pos = target_pos
+	for i in range(max_attempts):
+		query.transform = Transform2D(0, current_pos) # Check at current position
+		var results = space_state.intersect_shape(query)
+
+		var collision_found = false
+		for result in results:
+			if result.collider is DroppedItem: # Check if collision is with another dropped item
+				collision_found = true
+				break
+
+		if not collision_found:
+			return current_pos # Found a clear spot
+
+		# If collision found, try a slightly different position nearby
+		# Example: spiral outwards or pick random offset
+		var angle = randf() * TAU # Random angle
+		var dist = spread_distance * (float(i + 1) / max_attempts) # Spread further each attempt
+		current_pos = target_pos + Vector2(cos(angle), sin(angle)) * dist
+		print("Drop collision detected, trying new position:", current_pos) # Debug
+
+	# If still colliding after max attempts, return the last attempted position
+	print("Max drop attempts reached, placing at:", current_pos)
+	return current_pos
 
 # Plays the animation if it's different from the current one
 func play_animation_if_different(anim_name: String):
@@ -501,20 +536,36 @@ func _on_dash_recharge_timer_timeout():
 		print("Dash charges full.")
 
 func _on_pickup_area_entered(area):
-	# Check if the overlapping area is a DroppedItem using class_name or group
+	# Check if the overlapping area is a DroppedItem
 	if area is DroppedItem:
-		# Check if not already in the list (safety)
+		# --- Item Handles Its Own Prompt ---
+		# Add to nearby list for pickup logic, but DON'T show a player-level prompt.
 		if not area in nearby_items:
-			print("Item entered pickup range:", area.get_item_data().item_id) # Optional debug
+			print("Player detected nearby DroppedItem:", area.get_item_data().item_id) # Debug
 			nearby_items.append(area)
-			# TODO: Show pickup prompt? Highlight item?
+		# --- DO NOT display a generic player prompt here ---
+		# print("Player showing generic pickup prompt") # REMOVED
+		# hud.show_interaction_prompt("Pick Up (F)") # REMOVED (or similar logic)
+
+	# --- Handle other types of interactable areas if needed ---
+	# elif area.is_in_group("NPC"):
+	#     hud.show_interaction_prompt("Talk (F)")
+	# elif area.is_in_group("Chest"):
+	#     hud.show_interaction_prompt("Open (F)")
+	else:
+		print("Player pickup area entered unknown area type:", area.name) # Debug
 
 func _on_pickup_area_exited(area):
 	if area is DroppedItem:
 		if area in nearby_items:
-			print("Item exited pickup range:", area.get_item_data().item_id) # Optional debug
+			print("Player no longer near DroppedItem:", area.get_item_data().item_id) # Debug
 			nearby_items.erase(area) # Remove by value
-			# TODO: Hide pickup prompt? Unhighlight item?
+		# --- DO NOT hide a generic player prompt here for items ---
+		# hud.hide_interaction_prompt() # REMOVED (or similar logic)
+
+	# --- Handle other types ---
+	# elif area.is_in_group("NPC") or area.is_in_group("Chest"):
+	#     hud.hide_interaction_prompt()
 
 func _on_animation_finished(anim_name: String):
 	# Keep existing attack animation logic

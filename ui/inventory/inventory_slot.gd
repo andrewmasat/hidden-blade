@@ -79,25 +79,20 @@ func clear() -> void:
 func _gui_input(event: InputEvent) -> void:
 	# Handle Right-Click for splitting stacks
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
-		if Inventory.get_cursor_item() == null: # Only allow split if cursor is empty
+		if Inventory.get_cursor_item() == null:
 			print(" -> Slot [", slot_index, "] Right-click detected for split.") # Debug
 			Inventory.split_stack_to_cursor(inventory_area, slot_index)
-			accept_event() # Consume the right-click event
-		return # Don't process further
-
-	# Handle Left-Click Press for recording double-click start time
-	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
-		# Check if we are placing an item already on the cursor. If so, handle it immediately.
-		if Inventory.get_cursor_item() != null:
-			print(" -> Slot [", slot_index, "] Processing immediate place click (pressed) from _gui_input.") # Debug
-			Inventory.place_cursor_item_on_slot(inventory_area, slot_index)
 			accept_event()
-			return # Don't record click time etc. if placing
+		return
 
-		# If cursor is empty, this might be the first click of a double-click or drag start.
-		# Record the time but DO NOT consume the event. Let the Button signal handle completion/drag.
-		last_click_time_msec = Time.get_ticks_msec()
-		print(" -> Slot [", slot_index, "] First click press detected. Recorded time. Allowing drag/press signal.") # Debug
+	# Handle Left-Click Press ONLY for immediate placement if cursor has item
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+		if Inventory.get_cursor_item() != null:
+			print("  -> Slot [", slot_index, "] Processing immediate place click (pressed) from _gui_input.") # DEBUG
+			Inventory.place_cursor_item_on_slot(inventory_area, slot_index)
+			accept_event() # Consume the placement press
+			return
+		# If cursor empty, DO NOTHING HERE on press. Let the 'pressed' signal handle it.
 
 
 # Called AFTER a full Press+Release click completes on this Button node.
@@ -110,41 +105,53 @@ func _on_InventorySlot_pressed() -> void:
 	if item_on_cursor != null:
 		print("  -> Slot [", slot_index, "] Processing place click via pressed signal.") # Debug
 		Inventory.place_cursor_item_on_slot(inventory_area, slot_index)
-		# Placement logic handles cursor clearing and signals.
+		# Placement complete, ensure last click time is reset so next click isn't double
+		last_click_time_msec = 0
 		return # Action completed
 
-	# If cursor was empty, check if this completes a double-click.
+	# --- Double-Click / Single Click Logic ---
+	# Cursor is empty, process single/double click on the slot itself
 	var current_time_msec = Time.get_ticks_msec()
 	var time_diff = current_time_msec - last_click_time_msec
-	if time_diff < DOUBLE_CLICK_THRESHOLD_MSEC:
-		# Ensure this wasn't the *first* click by checking if time was recorded recently
+	var item_in_this_slot = Inventory.get_item_data(inventory_area, slot_index)
+
+	# Check if it's the SECOND click (time difference is small)
+	if item_in_this_slot != null and time_diff < DOUBLE_CLICK_THRESHOLD_MSEC:
+		# Make sure the first click was actually recorded (last_click_time_msec != 0)
 		if last_click_time_msec != 0:
-			print("  -> Slot [", slot_index, "] Double-click completed.") # Debug
-			_handle_double_click()
-			last_click_time_msec = 0 # Reset time after handling
-	# else: # Single click completed on an empty slot or slot with item (cursor was empty)
-		# No action needed here for single click completion. Drag starts on press+hold.
-		# last_click_time_msec was already updated by _gui_input on the press.
-		# print("  -> Slot [", slot_index, "] Single click completed (or second click too slow).") # Debug
+			print("  -> Slot [", slot_index, "] Double-click completed. Handling transfer.") # DEBUG
+			_handle_double_click() # Call the transfer logic
+			last_click_time_msec = 0 # Reset time after handling double-click
+		# else: # First click ever, time diff is huge negative, ignore
+			# print("  -> Slot [", slot_index, "] Ignoring potential double click on first ever click.")
+
+	else:
+		# --- This is the FIRST completed click (or second was too slow) ---
+		print("  -> Slot [", slot_index, "] Recording time for potential double-click.") # DEBUG
+		# Record the time of THIS click completion
+		last_click_time_msec = current_time_msec
+		# If this slot is in the hotbar, select it on the first click.
+		if inventory_area == Inventory.InventoryArea.HOTBAR:
+			print("  -> Slot [", slot_index, "] Single click on Hotbar slot - Selecting.") # Debug
+			Inventory.set_selected_slot(slot_index)
+		# else: # Single click on main inventory slot - no specific action besides recording time
+			# print("  -> Slot [", slot_index, "] Single click completed (Main Inv / Slow Double / Empty).") # Debug
 
 
 # Handles the logic for transferring items on double-click.
 func _handle_double_click() -> void:
 	var item_data: ItemData = Inventory.get_item_data(inventory_area, slot_index)
-	if not item_data is ItemData: return # Cannot transfer empty slot
+	if not item_data is ItemData: return
 
-	print("Handling double click for slot:", slot_index, "Area:", inventory_area) # Debug
+	print("Handling double click transfer for slot:", slot_index, "Area:", inventory_area) # Debug
 
 	if inventory_area == Inventory.InventoryArea.MAIN:
-		print(" -> Transferring MAIN to HOTBAR")
 		Inventory.transfer_to_hotbar(inventory_area, slot_index)
 	elif inventory_area == Inventory.InventoryArea.HOTBAR:
 		var is_panel_open = hud and hud.has_method("is_inventory_open") and hud.is_inventory_open()
 		if is_panel_open:
-			print(" -> Transferring HOTBAR to MAIN")
 			Inventory.transfer_to_main_inventory(inventory_area, slot_index)
-		else:
-			print(" -> Cannot transfer from hotbar, panel closed")
+		# else: print(" -> Cannot transfer from hotbar, panel closed")
 
 
 # --- Drag and Drop Methods ---
