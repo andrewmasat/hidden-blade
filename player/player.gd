@@ -243,7 +243,7 @@ func handle_world_drop(item_data_dropped: ItemData):
 		Inventory.add_item(item_data_dropped)
 		return
 
-	var current_level_node = SceneManager.current_scene_root
+	var current_level_node = SceneManager.current_level_root
 	if not is_instance_valid(current_level_node):
 		printerr("handle_world_drop Error: Cannot find current level node via SceneManager!")
 		# Try putting item back as fallback

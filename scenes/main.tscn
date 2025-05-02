@@ -1,9 +1,10 @@
-[gd_scene load_steps=9 format=3 uid="uid://5gwym5ctb8bm"]
+[gd_scene load_steps=10 format=3 uid="uid://5gwym5ctb8bm"]
 
 [ext_resource type="Script" uid="uid://byyns4gnqc7vv" path="res://scenes/Main.gd" id="1_0bbpv"]
 [ext_resource type="PackedScene" uid="uid://de0pjp7qqneue" path="res://player/Player.tscn" id="1_o5qli"]
 [ext_resource type="PackedScene" uid="uid://5jla8f64s8f" path="res://ui/Hud.tscn" id="2_0wfyh"]
 [ext_resource type="PackedScene" uid="uid://b25tddx3eacf2" path="res://scenes/City.tscn" id="2_rarhs"]
+[ext_resource type="PackedScene" uid="uid://bcwyb2xdhyby4" path="res://ui/PauseMenu.tscn" id="5_vcsgt"]
 
 [sub_resource type="Animation" id="Animation_0bbpv"]
 resource_name = "Fade_In"
@@ -72,6 +73,8 @@ y_sort_enabled = true
 [node name="Player" parent="WorldYSort" instance=ExtResource("1_o5qli")]
 
 [node name="FadeLayer" type="CanvasLayer" parent="." groups=["FadeLayer"]]
+layer = 2
+visible = false
 
 [node name="ColorRect" type="ColorRect" parent="FadeLayer"]
 anchors_preset = 15
@@ -87,3 +90,5 @@ libraries = {
 }
 
 [node name="HUD" parent="." instance=ExtResource("2_0wfyh")]
+
+[node name="PauseMenu" parent="." instance=ExtResource("5_vcsgt")]

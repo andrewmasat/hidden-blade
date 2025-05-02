@@ -135,7 +135,7 @@ alignment = 2
 
 [node name="Use" type="Button" parent="UIContainer/MarginContainer/VBoxContainer/Hotbar/KeyboardShortcuts"]
 layout_mode = 2
-theme_override_constants/outline_size = 4
+theme_override_constants/outline_size = 2
 text = "Use"
 icon = ExtResource("8_mr7hm")
 flat = true
@@ -145,7 +145,7 @@ expand_icon = true
 
 [node name="Backpack" type="Button" parent="UIContainer/MarginContainer/VBoxContainer/Hotbar/KeyboardShortcuts"]
 layout_mode = 2
-theme_override_constants/outline_size = 4
+theme_override_constants/outline_size = 2
 text = "Backpack"
 icon = ExtResource("8_spcu4")
 flat = true

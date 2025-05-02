@@ -34,7 +34,7 @@ anchors_preset = 10
 anchor_right = 1.0
 offset_bottom = 22.0
 grow_horizontal = 2
-theme_override_font_sizes/font_size = 32
+theme_override_font_sizes/font_size = 64
 text = "Ninja Adventure"
 horizontal_alignment = 1
 
@@ -55,21 +55,25 @@ theme_override_constants/separation = 15
 alignment = 1
 
 [node name="NewGameButton" type="Button" parent="MenuOptionsContainer"]
-custom_minimum_size = Vector2(150, 30)
+custom_minimum_size = Vector2(150, 35)
 layout_mode = 2
+theme_override_font_sizes/font_size = 26
 text = "New Game"
 
 [node name="LoadGameButton" type="Button" parent="MenuOptionsContainer"]
-custom_minimum_size = Vector2(150, 30)
+custom_minimum_size = Vector2(150, 35)
 layout_mode = 2
+theme_override_font_sizes/font_size = 26
 text = "Load Game"
 
 [node name="SettingsButton" type="Button" parent="MenuOptionsContainer"]
-custom_minimum_size = Vector2(150, 30)
+custom_minimum_size = Vector2(150, 35)
 layout_mode = 2
+theme_override_font_sizes/font_size = 26
 text = "Settings"
 
 [node name="QuitButton" type="Button" parent="MenuOptionsContainer"]
-custom_minimum_size = Vector2(150, 30)
+custom_minimum_size = Vector2(150, 35)
 layout_mode = 2
+theme_override_font_sizes/font_size = 26
 text = "Quit"
