@@ -26,10 +26,12 @@ func _ready() -> void:
 		# Give SceneManager reference to the player
 		SceneManager.player_node = player
 		# Give SceneManager reference to the CURRENT scene root node
-		SceneManager.current_scene_root = initial_level
+		SceneManager.current_level_root = initial_level
 		# --- Give SceneManager reference to the CONTAINER for levels ---
-		SceneManager.scene_container_node = environments_container # NEW reference
-		print("Main: Initialized SceneManager references (Player, Initial Level, Environments Container).")
+		SceneManager.scene_container_node = environments_container
+		# --- Call fade layer init AFTER main nodes ready ---
+		SceneManager.initialize_fade_layer()
+		print("Main: Initialized SceneManager. player_node is valid:", is_instance_valid(SceneManager.player_node)) # DEBUG
 	else:
 		printerr("Main Error: SceneManager autoload not found!")
 

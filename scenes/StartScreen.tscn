@@ -1,0 +1,75 @@
+[gd_scene load_steps=4 format=3 uid="uid://4x8fl5eedbxy"]
+
+[ext_resource type="Script" uid="uid://586v8lf32r88" path="res://scenes/StartScreen.gd" id="1_4vrcr"]
+
+[sub_resource type="Gradient" id="Gradient_luenw"]
+colors = PackedColorArray(0.0338533, 0.0338533, 0.0338533, 1, 0.122252, 0.122252, 0.122252, 1)
+
+[sub_resource type="GradientTexture2D" id="GradientTexture2D_4vrcr"]
+gradient = SubResource("Gradient_luenw")
+fill_to = Vector2(0, 1)
+
+[node name="StartScreen" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_4vrcr")
+
+[node name="Background" type="TextureRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+texture = SubResource("GradientTexture2D_4vrcr")
+
+[node name="TitleLabel" type="Label" parent="."]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_bottom = 22.0
+grow_horizontal = 2
+theme_override_font_sizes/font_size = 32
+text = "Ninja Adventure"
+horizontal_alignment = 1
+
+[node name="MenuOptionsContainer" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -20.0
+offset_top = -20.0
+offset_right = 20.0
+offset_bottom = 20.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 15
+alignment = 1
+
+[node name="NewGameButton" type="Button" parent="MenuOptionsContainer"]
+custom_minimum_size = Vector2(150, 30)
+layout_mode = 2
+text = "New Game"
+
+[node name="LoadGameButton" type="Button" parent="MenuOptionsContainer"]
+custom_minimum_size = Vector2(150, 30)
+layout_mode = 2
+text = "Load Game"
+
+[node name="SettingsButton" type="Button" parent="MenuOptionsContainer"]
+custom_minimum_size = Vector2(150, 30)
+layout_mode = 2
+text = "Settings"
+
+[node name="QuitButton" type="Button" parent="MenuOptionsContainer"]
+custom_minimum_size = Vector2(150, 30)
+layout_mode = 2
+text = "Quit"

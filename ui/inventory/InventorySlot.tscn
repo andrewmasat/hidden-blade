@@ -1,6 +1,21 @@
-[gd_scene load_steps=2 format=3 uid="uid://p5rcch5nsaa1"]
+[gd_scene load_steps=5 format=3 uid="uid://p5rcch5nsaa1"]
 
 [ext_resource type="Script" uid="uid://67yljjf2c3kw" path="res://ui/inventory/InventorySlot.gd" id="1_nktrt"]
+[ext_resource type="Texture2D" uid="uid://d3mssnlxkq31n" path="res://assets/Ui/Theme/Theme Wood/inventory_cell.png" id="2_jffjn"]
+
+[sub_resource type="StyleBoxTexture" id="StyleBoxTexture_22ksf"]
+texture = ExtResource("2_jffjn")
+texture_margin_left = 3.0
+texture_margin_top = 3.0
+texture_margin_right = 3.0
+texture_margin_bottom = 3.0
+
+[sub_resource type="StyleBoxTexture" id="StyleBoxTexture_jffjn"]
+texture = ExtResource("2_jffjn")
+texture_margin_left = 3.0
+texture_margin_top = 3.0
+texture_margin_right = 3.0
+texture_margin_bottom = 3.0
 
 [node name="InventorySlot" type="Button"]
 clip_contents = true
@@ -8,6 +23,8 @@ custom_minimum_size = Vector2(40, 40)
 offset_right = 40.0
 offset_bottom = 40.0
 focus_mode = 1
+theme_override_styles/hover = SubResource("StyleBoxTexture_22ksf")
+theme_override_styles/normal = SubResource("StyleBoxTexture_jffjn")
 script = ExtResource("1_nktrt")
 
 [node name="ItemIcon" type="TextureRect" parent="."]
@@ -15,6 +32,10 @@ layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
+offset_left = 4.0
+offset_top = 4.0
+offset_right = -4.0
+offset_bottom = -4.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
