@@ -13,6 +13,8 @@ var scene_container_node: Node = null
 var fade_layer: CanvasLayer = null
 var fade_player: AnimationPlayer = null
 
+const TRIGGER_LAYER_BIT_VALUE = 10
+
 func _ready() -> void:
 	# Find the fade layer if using one (assumes it's added elsewhere, e.g., in main scene)
 	var potential_fade_layer = get_tree().get_first_node_in_group("FadeLayer")
@@ -33,10 +35,17 @@ func change_scene(target_scene_path: String, target_spawn_name: String) -> void:
 	print("SceneManager: change_scene requested to", target_scene_path, "at", target_spawn_name)
 	emit_signal("scene_change_requested", target_scene_path, target_spawn_name)
 
-	# --- Start Fade Out (if available) ---
+	# --- Tell Player to Stop Moving (using the dedicated method) ---
+	if is_instance_valid(player_node) and player_node.has_method("start_scene_transition"):
+		player_node.start_scene_transition()
+	else:
+		printerr("SceneManager: Cannot call player.start_scene_transition()!")
+		return # Abort if player state can't be set
+
+	# --- Start Fade Out ---
 	if fade_player and fade_player.has_animation("Fade_In"):
 		fade_player.play("Fade_In")
-		await fade_player.animation_finished # Wait for fade to complete
+		await fade_player.animation_finished
 		# Perform actual scene change AFTER fade
 		_perform_scene_change(target_scene_path, target_spawn_name)
 	else:
@@ -88,14 +97,13 @@ func _perform_scene_change(target_scene_path: String, target_spawn_name: String)
 
 	print("  -> New scene instantiated:", current_scene_root.name)
 
-	# 5. Add the new scene to the tree (as a child of the main root, e.g., /root/Main)
+	# 5. Add the new scene TO THE CONTAINER NODE
 	scene_container_node.add_child(current_scene_root)
 	print("  -> New scene added to container:", scene_container_node.name)
 
-	# 7. Find the spawn point in the NEW scene
+	# 6. Find spawn point & position player
 	var spawn_point: Node2D = current_scene_root.find_child(target_spawn_name, true, false) as Node2D
 	var target_position: Vector2
-
 	if not is_instance_valid(spawn_point):
 		printerr("SceneManager Warning: Target spawn '", target_spawn_name, "' not found. Using scene origin.")
 		# Fallback: Place player at the origin of the new scene root (relative to container)
@@ -104,16 +112,34 @@ func _perform_scene_change(target_scene_path: String, target_spawn_name: String)
 		print("  -> Spawn point '", spawn_point.name, "' found.")
 		target_position = spawn_point.global_position # Get spawn's global position
 
-	# 8. Position the player (Player is likely still child of Main, not Environments)
-	player_node.call("set_transitioning_state", true) # Tell player it's transitioning
 	player_node.global_position = target_position
 	print("  -> Player positioned at:", target_position)
+	
+	var original_player_layer = player_node.collision_layer
+	var disabled_layer = 0 # Set to layer 0 (nothing) temporarily
+	if original_player_layer != disabled_layer: # Avoid unnecessary changes
+		print("  -> Disabling player trigger collision layer. Original:", original_player_layer) # Debug
+		player_node.set_collision_layer(disabled_layer)
 
-	# 9. Wait briefly before clearing transition state
-	await get_tree().create_timer(0.1).timeout # Wait 0.1 sec
-	# Check if player node still valid before calling method
+	# 7. Wait for grace period (0.1 seconds)
+	print("SceneManager: Starting grace period wait...")
+	await get_tree().create_timer(0.1).timeout
+	print("SceneManager: Grace period finished.")
+
+	# 8. Restore Player Collision Layer & End Transition State (Deferred)
 	if is_instance_valid(player_node):
-		player_node.call("set_transitioning_state", false) # Clear flag after delay
+		# Restore deferred to ensure physics server updates after setting layer
+		player_node.call_deferred("set_collision_layer", original_player_layer)
+		print("SceneManager: Scheduling restore player collision layer to:", original_player_layer) # Debug
+
+		# End transition state deferred
+		if player_node.has_method("end_scene_transition"):
+			player_node.call_deferred("end_scene_transition")
+			print("SceneManager: Called player.end_scene_transition (deferred).")
+		else:
+			printerr("SceneManager: Cannot call player.end_scene_transition()!")
+	else:
+			print("SceneManager: Player node invalid before restoring state!")
 
 	emit_signal("scene_load_finished", current_scene_root)
 	print("SceneManager: Scene change complete.")

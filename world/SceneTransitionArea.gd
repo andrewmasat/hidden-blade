@@ -9,32 +9,29 @@ class_name SceneTransitionArea
 ## where the player should appear after transitioning.
 @export var target_spawn_name: String = "DefaultSpawn"
 
-# Connect this signal in the editor:
-# Select SceneTransitionArea -> Node Dock -> Signals -> body_entered -> Connect...
+func _ready():
+	# Ensure monitoring is enabled when the scene loads/reloads
+	monitoring = true
+
 func _on_body_entered(body: Node) -> void:
 	# Check if the entering body is the player (using a group)
 	if body.is_in_group("player"):
+		# Check if the player is currently immune due to just transitioning
 		if body.has_method("is_currently_transitioning") and body.is_currently_transitioning():
 			print("TransitionArea: Ignoring entry, player is currently transitioning.") # Debug
-			return # Ignore entry if player just spawned
+			return # Ignore entry
 
-		print("Player entered transition area. Target:", target_scene_path, "Spawn:", target_spawn_name) # Debug
-
-		# Basic validation
-		if target_scene_path.is_empty():
-			printerr("SceneTransitionArea Error: Target scene path is not set!")
-			return
-		if target_spawn_name.is_empty():
-			printerr("SceneTransitionArea Error: Target spawn name is not set!")
-			# Could default to a standard name, but better to require it.
+		print("Player entered transition area. Target:", target_scene_path, "Spawn:", target_spawn_name)
+		# Validate paths
+		if target_scene_path.is_empty() or target_spawn_name.is_empty():
+			printerr("SceneTransitionArea Error: Target scene/spawn not set!")
 			return
 
-		# --- Call the Scene Manager to handle the transition ---
-		# Check if SceneManager autoload exists and has the function
+		# Trigger transition via SceneManager
 		if SceneManager and SceneManager.has_method("change_scene"):
-			# Prevent triggering multiple times if player lingers
+			# Disable self deferred to prevent immediate re-trigger and physics errors
 			set_deferred("monitoring", false)
-			# Use call_deferred to avoid issues during physics step
+			# Call SceneManager deferred
 			SceneManager.call_deferred("change_scene", target_scene_path, target_spawn_name)
 		else:
-			printerr("SceneTransitionArea Error: SceneManager autoload or change_scene method not found!")
+			printerr("SceneTransitionArea Error: SceneManager/change_scene not found!")

@@ -160,12 +160,12 @@ pickup_item={
 
 [layer_names]
 
-2d_physics/layer_1="world"
+2d_physics/layer_1="World"
 2d_physics/layer_2="PlayerPhysics"
 2d_physics/layer_3="PlayerInteraction"
 2d_physics/layer_5="EnemyPhysics"
 2d_physics/layer_9="Items"
-2d_physics/layer_10="SceneTransition"
+2d_physics/layer_10="SceneTriggers"
 
 [rendering]
 

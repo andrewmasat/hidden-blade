@@ -8,7 +8,7 @@ const DroppedItemScene = preload("res://world/DroppedItem.tscn")
 signal health_changed(current_health: float, max_health: float)
 signal dash_charges_changed(current_charges: int, max_charges: int)
 
-enum State { IDLE_RUN, DASH, ATTACK }
+enum State { IDLE_RUN, DASH, ATTACK, TRANSITIONING }
 
 # Stats
 @export var max_health: float = 100.0
@@ -41,7 +41,6 @@ var current_state: State = State.IDLE_RUN
 var last_direction: Vector2 = Vector2.DOWN
 var equipped_item_data: ItemData = null
 var nearby_items: Array[DroppedItem] = []
-var is_transitioning: bool = false
 
 # Node References
 @onready var animated_sprite = $AnimatedSprite2D
@@ -68,6 +67,8 @@ func _ready():
 	if is_instance_valid(pickup_area):
 		pickup_area.area_entered.connect(_on_pickup_area_entered)
 		pickup_area.area_exited.connect(_on_pickup_area_exited)
+
+	current_state = State.IDLE_RUN
 
 	_equip_item(Inventory.get_selected_item())
 
@@ -117,7 +118,13 @@ func _physics_process(delta: float):
 			process_dash_state(delta)
 		State.ATTACK:
 			process_attack_state(delta)
+		State.TRANSITIONING:
+			velocity = Vector2.ZERO
+			pass
+
 	move_and_slide()
+
+	_update_hand_and_weapon_animation()
 
 # --- State Processing ---
 func process_idle_run_state(delta: float):
@@ -136,19 +143,11 @@ func process_idle_run_state(delta: float):
 
 	# --- Handle standard movement input ---
 	var input_direction = Input.get_vector("move_left", "move_right", "move_up", "move_down")
-	var is_moving = false
 	if input_direction != Vector2.ZERO:
 		velocity = input_direction.normalized() * speed
-		# IMPORTANT: Update last_direction ONLY when input is active
 		last_direction = input_direction.normalized()
-		is_moving = true
 	else:
 		velocity = velocity.move_toward(Vector2.ZERO, speed)
-		is_moving = (velocity.length_squared() > 0.1) # Still considered moving if decelerating
-
-	# --- Update Animation ---
-	# Call the central function AFTER velocity and last_direction are potentially updated
-	_update_hand_and_weapon_animation()
 
 func process_dash_state(delta: float):
 	pass # Movement handled by move_and_slide
@@ -157,12 +156,6 @@ func process_attack_state(delta: float):
 	velocity = Vector2.ZERO
 	pass # State ends on animation finish
 
-func set_transitioning_state(state: bool):
-	is_transitioning = state
-	print("Player transitioning state set to:", state) # Debug
-
-func is_currently_transitioning() -> bool:
-	return is_transitioning
 
 # --- Action Start Functions ---
 func start_dash():
@@ -246,34 +239,37 @@ func handle_world_drop(item_data_dropped: ItemData):
 	# Uses the same logic as try_drop_selected_item, but item is already "removed" (was on cursor)
 	if DroppedItemScene == null:
 		printerr("DroppedItemScene not preloaded! Cannot drop item.")
-		# Try putting item back in inventory as fallback
-		if not Inventory.add_item(item_data_dropped):
-			printerr("  -> Failed to add dropped item back to inventory!")
+		# Try putting item back? Might fail if inventory full.
+		Inventory.add_item(item_data_dropped)
 		return
+
+	var current_level_node = SceneManager.current_scene_root
+	if not is_instance_valid(current_level_node):
+		printerr("handle_world_drop Error: Cannot find current level node via SceneManager!")
+		# Try putting item back as fallback
+		Inventory.add_item(item_data_dropped)
+		return
+
+	var dropped_item_instance = DroppedItemScene.instantiate()
 
 	# Determine drop position (slightly in front of player)
 	var drop_offset = last_direction.normalized() * 25.0
 	if drop_offset == Vector2.ZERO: drop_offset = Vector2(25, 0)
 	var initial_drop_position = global_position + drop_offset
-
 	var final_drop_position = find_non_overlapping_drop_position(initial_drop_position)
 
-	# Add to scene tree (player's parent)
-	var dropped_item_instance = DroppedItemScene.instantiate()
-	var main_level = get_parent()
-	if is_instance_valid(main_level):
-		main_level.add_child(dropped_item_instance)
+	current_level_node.add_child(dropped_item_instance)
+	print("  -> Dropped item added as child of:", current_level_node.name) # Debug
+	# -----------------------------------------
 
-		# Initialize the dropped item with data
-		if dropped_item_instance.has_method("initialize"):
-			dropped_item_instance.initialize(item_data_dropped, final_drop_position)
-		else:
-			printerr("DroppedItem instance missing initialize method!")
-			dropped_item_instance.queue_free()
-			Inventory.add_item(item_data_dropped) # Try to put back
+	# Initialize the dropped item with data AND position
+	if dropped_item_instance.has_method("initialize"):
+		# Position is set correctly within initialize now
+		dropped_item_instance.initialize(item_data_dropped, final_drop_position)
 	else:
-		printerr("Player has no valid parent to add dropped item to!")
-		Inventory.add_item(item_data_dropped) # Try to put back
+		printerr("DroppedItem instance missing initialize method!")
+		dropped_item_instance.queue_free() # Clean up invalid instance
+		Inventory.add_item(item_data_dropped) # Try to put item back
 
 # --- Helper Functions ---
 func get_target_animation() -> String:
@@ -290,21 +286,20 @@ func get_target_animation() -> String:
 			action_prefix = "dash" # Assumes dash animations exist
 		State.ATTACK:
 			action_prefix = "attack" # Assumes attack animations exist
+		State.TRANSITIONING:
+			# While transitioning, visually appear idle based on last direction
+			action_prefix = "idle"
 		_:
 			action_prefix = "idle" # Fallback
 
 	# Determine direction suffix based on last_direction
-	var direction_suffix = ""
+	var direction_suffix = "down"
 	# Use a small threshold to prevent direction switching when stopping near zero
 	if abs(last_direction.x) > 0.1 or abs(last_direction.y) > 0.1:
 		if abs(last_direction.x) > abs(last_direction.y):
 			direction_suffix = "right" if last_direction.x > 0 else "left"
 		else:
 			direction_suffix = "down" if last_direction.y > 0 else "up"
-	else:
-		# If velocity is zero and last_direction is zeroish, default to down? Or keep previous?
-		# Let's try defaulting to down if completely stopped.
-		direction_suffix = "down"
 
 	# Construct the animation name (e.g., "run_right", "idle_up")
 	return action_prefix + "_" + direction_suffix
@@ -367,9 +362,27 @@ func play_animation_if_different(anim_name: String):
 		printerr("AnimationPlayer node is not valid!")
 
 
+# Called by SceneManager BEFORE starting the fade/load
+func start_scene_transition() -> void:
+	if current_state == State.TRANSITIONING: return
+	print("Player: Entering TRANSITIONING state.")
+	current_state = State.TRANSITIONING
+	velocity = Vector2.ZERO
+
+# Called by SceneManager AFTER new scene loaded, player positioned, grace period waited.
+func end_scene_transition() -> void:
+	if not is_instance_valid(self) or current_state != State.TRANSITIONING: return
+	print("Player: Exiting TRANSITIONING state.")
+	current_state = State.IDLE_RUN
+	velocity = Vector2.ZERO
+
+# Simplify this check if flag removed
+func is_currently_transitioning() -> bool:
+	return current_state == State.TRANSITIONING
+
 # Central function called whenever state or direction might change animation
 func _update_hand_and_weapon_animation():
-	var target_anim = get_target_animation()
+	var target_anim = get_target_animation() # Get animation based on current state/direction
 	play_animation_if_different(target_anim)
 
 # --- Equipping ---

@@ -1,4 +1,4 @@
-[gd_scene load_steps=10 format=3 uid="uid://5jla8f64s8f"]
+[gd_scene load_steps=11 format=3 uid="uid://5jla8f64s8f"]
 
 [ext_resource type="Script" uid="uid://b56rv0tql5rd7" path="res://ui/Hud.gd" id="1_1v5rv"]
 [ext_resource type="Texture2D" uid="uid://cd7nrnoa5d2g4" path="res://assets/Ui/Receptacle/LifeBarMiniUnder.png" id="1_en2x2"]
@@ -8,6 +8,7 @@
 [ext_resource type="Texture2D" uid="uid://d3ohffxbqnpdn" path="res://assets/Ui/Receptacle/Receptacle Sphere/Select.png" id="5_spcu4"]
 [ext_resource type="PackedScene" uid="uid://cc141b611ya43" path="res://ui/inventory/InventoryPanel.tscn" id="6_1v5rv"]
 [ext_resource type="PackedScene" uid="uid://l1ltos0l2n54" path="res://ui/inventory/CursorItemDisplay.tscn" id="7_q43x7"]
+[ext_resource type="Texture2D" uid="uid://c70lsaaeo4g3b" path="res://assets/Ui/Input/Keyboard/KeyE.png" id="8_mr7hm"]
 [ext_resource type="Texture2D" uid="uid://coaf760ho47pk" path="res://assets/Ui/Input/Keyboard/KeyB.png" id="8_spcu4"]
 
 [node name="HUD" type="CanvasLayer" groups=["HUD"]]
@@ -126,18 +127,28 @@ anchor_left = 1.0
 anchor_top = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = -101.0
-offset_top = -40.0
+offset_left = -122.0
+offset_top = -64.0
 grow_horizontal = 0
 grow_vertical = 0
 alignment = 2
 
+[node name="Use" type="Button" parent="UIContainer/MarginContainer/VBoxContainer/Hotbar/KeyboardShortcuts"]
+layout_mode = 2
+text = "Use"
+icon = ExtResource("8_mr7hm")
+flat = true
+alignment = 2
+icon_alignment = 2
+expand_icon = true
+
 [node name="Backpack" type="Button" parent="UIContainer/MarginContainer/VBoxContainer/Hotbar/KeyboardShortcuts"]
 layout_mode = 2
-text = "ackpack"
+text = "Backpack"
 icon = ExtResource("8_spcu4")
 flat = true
-alignment = 0
+alignment = 2
+icon_alignment = 2
 expand_icon = true
 
 [node name="CursorItemDisplay" parent="." instance=ExtResource("7_q43x7")]
