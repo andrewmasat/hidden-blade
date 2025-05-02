@@ -74,7 +74,6 @@ y_sort_enabled = true
 
 [node name="FadeLayer" type="CanvasLayer" parent="." groups=["FadeLayer"]]
 layer = 2
-visible = false
 
 [node name="ColorRect" type="ColorRect" parent="FadeLayer"]
 anchors_preset = 15
