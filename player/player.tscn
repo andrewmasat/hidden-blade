@@ -284,7 +284,7 @@ animations = [{
 }]
 
 [sub_resource type="CircleShape2D" id="CircleShape2D_oul6g"]
-radius = 8.0
+radius = 6.0
 
 [sub_resource type="CircleShape2D" id="CircleShape2D_g1dw6"]
 radius = 12.0416
@@ -1412,6 +1412,7 @@ sprite_frames = SubResource("SpriteFrames_bjvpn")
 animation = &"idle_up"
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+position = Vector2(0, 6)
 shape = SubResource("CircleShape2D_oul6g")
 
 [node name="PickupArea" type="Area2D" parent="." groups=["player_pickup_area"]]
