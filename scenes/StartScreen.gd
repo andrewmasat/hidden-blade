@@ -25,8 +25,11 @@ func _ready() -> void:
 
 	if is_instance_valid(load_game_button):
 		load_game_button.pressed.connect(_on_load_game_pressed)
-	else:
-		printerr("StartScreen Error: LoadGameButton node not found!")
+		# Disable if no save file exists initially
+		if SaveManager:
+			load_game_button.disabled = not SaveManager.has_save_file()
+		else:
+			load_game_button.disabled = true # Disable if manager missing
 
 	if is_instance_valid(settings_button):
 		settings_button.pressed.connect(_on_settings_pressed)
@@ -73,13 +76,16 @@ func _on_new_game_pressed() -> void:
 
 
 func _on_load_game_pressed() -> void:
-	print("Load Game button pressed. (Not Implemented)")
-	# TODO: Implement save game loading logic
-	# 1. Show a loading screen or file selector UI
-	# 2. Load save data from file (e.g., player stats, position, current scene path, inventory)
-	# 3. Call SceneManager.change_scene (or a dedicated load function)
-	#    passing the loaded scene path and spawn name/position.
-	# 4. After scene loads, apply loaded player stats, inventory etc.
+	if SaveManager and SaveManager.has_save_file():
+		print("StartScreen: Load Game button pressed. Requesting load...")
+		_set_buttons_disabled(true) # Disable buttons during load attempt
+		SaveManager.load_game()
+		# Scene change is handled by SaveManager/SceneManager now
+	elif SaveManager:
+		print("StartScreen: Load Game button pressed, but no save file found.")
+		# TODO: Show message to player? Maybe disable button?
+	else:
+		printerr("StartScreen: SaveManager not found!")
 
 
 func _on_settings_pressed() -> void:

@@ -76,11 +76,17 @@ func _on_settings_button_pressed() -> void:
 
 
 func _on_save_button_pressed() -> void:
-	print("PauseMenu: Save Game button pressed. (Not Implemented)")
-	# TODO: Implement save game logic
-	# 1. Pause might need to stay open while saving?
-	# 2. Call a function in a SaveManager autoload?
-	# 3. Provide feedback (Saving..., Saved!)
+	if SaveManager:
+		print("PauseMenu: Requesting save...")
+		# Optional: Show "Saving..." message
+		save_button.disabled = true # Prevent multi-click
+		SaveManager.save_game()
+		# Connect to SaveManager's save_completed signal
+		# to show "Saved!" message and re-enable button
+		if not SaveManager.save_completed.is_connected(_on_save_completed):
+			SaveManager.save_completed.connect(_on_save_completed)
+	else:
+		printerr("PauseMenu: SaveManager not found!")
 
 
 func _on_quit_to_menu_button_pressed() -> void:
@@ -101,6 +107,20 @@ func _on_quit_to_menu_button_pressed() -> void:
 		# This fallback WILL likely cause the original issue if SceneManager isn't adapted
 		get_tree().change_scene_to_file(START_SCREEN_PATH)
 
+
+func _on_save_completed(success: bool):
+	print("PauseMenu: Save completed signal received. Success:", success) # Debug
+	if is_instance_valid(save_button): # Check node still exists
+		save_button.disabled = false
+		if success:
+			# TODO: Show temporary "Game Saved!" message on HUD/Menu
+			pass
+		else:
+			# TODO: Show "Save Failed!" message
+			pass
+	# Disconnect signal AFTER handling? Or keep connected? Depends on structure.
+	# if SaveManager.save_completed.is_connected(_on_save_completed):
+	#     SaveManager.save_completed.disconnect(_on_save_completed)
 
 # Helper to enable/disable menu buttons (e.g., during transitions)
 func _set_buttons_disabled(disabled: bool) -> void:

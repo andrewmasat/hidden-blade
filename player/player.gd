@@ -202,6 +202,62 @@ func die():
 	print("Player has died!")
 	queue_free()
 
+# --- SAVE/LOAD ---
+
+# Returns a dictionary representing the player's save state
+func get_save_data() -> Dictionary:
+	var current_level_path = ""
+	if SceneManager and is_instance_valid(SceneManager.current_level_root):
+		current_level_path = SceneManager.current_level_root.scene_file_path
+		if current_level_path.is_empty():
+			printerr("Player Save Warning: SceneManager.current_level_root has empty scene_file_path!")
+	elif SceneManager:
+			printerr("Player Save Error: SceneManager.current_level_root is invalid!")
+	else:
+		printerr("Player Save Error: SceneManager not found!")
+
+	var save_data = {
+		"scene_path": current_level_path, # Path of the scene player is IN
+		"position_x": global_position.x,
+		"position_y": global_position.y,
+		"current_health": current_health,
+		"current_dashes": _current_dashes, # Save internal dash count
+		"last_direction_x": last_direction.x, # Save facing direction
+		"last_direction_y": last_direction.y,
+		# Add other things like score, quest progress flags etc. later
+	}
+	print("Player: Generated save data.") # Debug
+	return save_data
+
+# Loads player state from a dictionary. Scene change handled by SceneManager.
+func load_save_data(data: Dictionary) -> void:
+	if not data:
+		printerr("Player: Invalid save data provided.")
+		return
+
+	# Position is set by SceneManager based on scene path/spawn name (or loaded pos)
+	# We only restore stats here.
+	self.current_health = data.get("current_health", max_health) # Use setter for signals
+	self.current_dashes = data.get("current_dashes", max_dashes) # Use setter for signals
+	last_direction = Vector2(data.get("last_direction_x", 0), data.get("last_direction_y", 1)) # Default down
+	if last_direction == Vector2.ZERO: last_direction = Vector2.DOWN # Ensure valid direction
+
+	# Reset state machine to default
+	current_state = State.IDLE_RUN
+	velocity = Vector2.ZERO
+
+	# Reset timers?
+	dash_timer.stop()
+	dash_recharge_timer.stop()
+	# Manually restart recharge timer if needed based on loaded dashes
+	if _current_dashes < max_dashes and dash_recharge_timer.is_stopped():
+		dash_recharge_timer.start() # Or maybe save/load timer remaining time? More complex.
+
+	# Ensure visual updates after loading stats
+	_update_hand_and_weapon_animation()
+
+	print("Player: Loaded save data (excluding position).") # Debug
+
 func handle_inventory_input():
 	# Cycle selection
 	if Input.is_action_just_pressed("inventory_next"):

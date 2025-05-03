@@ -30,6 +30,87 @@ func _ready():
 	inventory_slots.fill(null)
 	print("Inventory initialized. Hotbar:", hotbar_slots.size(), "Main:", inventory_slots.size())
 
+# --- SAVE/LOAD ---
+
+# Returns a dictionary representing the current inventory state
+func get_save_data() -> Dictionary:
+	var save_data = {
+		"hotbar": [],
+		"main": [],
+		"selected_index": selected_slot_index,
+	}
+	# Save item_id and quantity
+	for item_data in hotbar_slots:
+		if item_data is ItemData:
+			# --- SAVE item_id INSTEAD OF PATH ---
+			save_data["hotbar"].append({"item_id": item_data.item_id, "quantity": item_data.quantity})
+		else:
+			save_data["hotbar"].append(null) # Empty slot
+
+	for item_data in inventory_slots:
+		if item_data is ItemData:
+			# --- SAVE item_id INSTEAD OF PATH ---
+			save_data["main"].append({"item_id": item_data.item_id, "quantity": item_data.quantity})
+		else:
+			save_data["main"].append(null)
+
+	print("Inventory: Generated save data using item_id.") # Debug
+	return save_data
+
+# Loads inventory state from a dictionary
+func load_save_data(data: Dictionary) -> void:
+	if not data or not data.has("hotbar") or not data.has("main") or not data.has("selected_index"):
+		printerr("Inventory: Invalid save data format provided.")
+		return
+
+	# Clear existing inventory first
+	hotbar_slots.clear()
+	hotbar_slots.resize(HOTBAR_SIZE)
+	hotbar_slots.fill(null)
+	inventory_slots.clear()
+	inventory_slots.resize(INVENTORY_SIZE)
+	inventory_slots.fill(null)
+
+	# Load Hotbar
+	var loaded_hotbar = data.get("hotbar", [])
+	for i in range(min(loaded_hotbar.size(), HOTBAR_SIZE)):
+		var slot_data = loaded_hotbar[i]
+		# Check for item_id now
+		if slot_data is Dictionary and slot_data.has("item_id") and slot_data.has("quantity"):
+			var item_id = slot_data["item_id"]
+			var item_base_res = ItemDatabase.get_item_base(item_id) # Get base from DB
+			if item_base_res is ItemData:
+				var item_instance = item_base_res.duplicate() # DUPLICATE base resource
+				item_instance.quantity = slot_data["quantity"]
+				hotbar_slots[i] = item_instance
+				_emit_change_signal(InventoryArea.HOTBAR, i, item_instance)
+			else:
+				printerr("Inventory Load: Failed to find ItemData in Database for item_id:", item_id)
+		# else: Slot remains null
+
+	# Load Main Inventory
+	var loaded_main = data.get("main", [])
+	for i in range(min(loaded_main.size(), INVENTORY_SIZE)):
+		var slot_data = loaded_main[i]
+		if slot_data is Dictionary and slot_data.has("item_id") and slot_data.has("quantity"):
+			var item_id = slot_data["item_id"]
+			var item_base_res = ItemDatabase.get_item_base(item_id) # Get base from DB
+			if item_base_res is ItemData:
+				var item_instance = item_base_res.duplicate() # DUPLICATE base resource
+				item_instance.quantity = slot_data["quantity"]
+				inventory_slots[i] = item_instance
+				_emit_change_signal(InventoryArea.MAIN, i, item_instance)
+			else:
+				printerr("Inventory Load: Failed to find ItemData in Database for item_id:", item_id)
+		# else: Slot remains null
+
+	# Restore selected index (use setter to emit signal)
+	set_selected_slot(data.get("selected_index", 0))
+
+	# Ensure cursor item is cleared after load
+	clear_cursor_item()
+
+	print("Inventory: Loaded save data.") # Debug
 
 # --- Item Management ---
 # Add item: Tries to stack first, then find empty

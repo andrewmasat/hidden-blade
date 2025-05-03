@@ -17,8 +17,10 @@ config/icon="res://icon.svg"
 
 [autoload]
 
-Inventory="*res://scripts/Inventory.gd"
 SceneManager="*res://scripts/SceneManager.gd"
+SaveManager="*res://scripts/SaveManager.gd"
+ItemDatabase="*res://scripts/ItemDatabase.gd"
+Inventory="*res://scripts/Inventory.gd"
 
 [display]
 
