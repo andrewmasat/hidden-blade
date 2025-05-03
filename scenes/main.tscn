@@ -63,11 +63,13 @@ _data = {
 [node name="Main" type="Node2D"]
 script = ExtResource("1_0bbpv")
 
-[node name="Environments" type="Node2D" parent="."]
-
-[node name="City" parent="Environments" instance=ExtResource("2_rarhs")]
-
 [node name="WorldYSort" type="Node2D" parent="."]
+y_sort_enabled = true
+
+[node name="Environments" type="Node2D" parent="WorldYSort"]
+y_sort_enabled = true
+
+[node name="City" parent="WorldYSort/Environments" instance=ExtResource("2_rarhs")]
 y_sort_enabled = true
 
 [node name="Player" parent="WorldYSort" instance=ExtResource("1_o5qli")]

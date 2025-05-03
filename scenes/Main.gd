@@ -2,7 +2,7 @@
 extends Node
 
 # Adjust paths based on your exact node names in Main.tscn
-@onready var environments_container: Node2D = $Environments
+@onready var environments_container: Node2D = $WorldYSort/Environments
 @onready var player: CharacterBody2D = $WorldYSort/Player
 @onready var pause_menu = $PauseMenu
 # We need a way to know which child of 'Environments' is the starting level
