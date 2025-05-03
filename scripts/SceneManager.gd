@@ -117,16 +117,68 @@ func _perform_scene_change(target_scene_path: String, target_spawn_name: String)
 	var is_loading_main_scene = (target_scene_path == MAIN_SCENE_PATH)
 
 	# 1. Free the appropriate old scene (Main or Level)
-	_free_previous_scene(is_loading_main_scene)
+	print("  -> Checking node to free (current_scene_root): ", current_scene_root.name if is_instance_valid(current_scene_root) else "None") # Debug
+	if is_instance_valid(current_scene_root):
+		var old_scene_parent = current_scene_root.get_parent()
+		if is_instance_valid(old_scene_parent):
+			print("  -> Removing old scene '", current_scene_root.name, "' from parent '", old_scene_parent.name, "'")
+			old_scene_parent.remove_child(current_scene_root)
+		else:
+			printerr("  -> Warning: Old scene '", current_scene_root.name, "' had no parent?")
 
-	# 2. Load and instantiate the new scene
-	var new_scene_instance = await _load_scene_instance(target_scene_path)
-	if not is_instance_valid(new_scene_instance):
-		# Error handled in helper, potentially faded out
-		return # Abort if loading failed
+		current_scene_root.queue_free()
+		print("  -> queue_free() called on old scene.")
+	else:
+		print("  -> No valid previous scene found in current_scene_root to free.")
 
-	# 3. Add new scene to the tree and update references
-	_add_new_scene_to_tree(new_scene_instance, is_loading_main_scene)
+	# --- Clear References Based on Context ---
+	# References related to the *structure* being unloaded need clearing.
+	if is_loading_main_scene:
+		# If we are about to load Main, the PREVIOUS scene was NOT Main,
+		# so player/container/level refs should already be null from return_to_start_screen.
+		# We just ensure main_scene_root is ready to be set.
+		main_scene_root = null
+		current_level_root = null # No level loaded yet within the new Main
+		# We don't clear player/container here; they will be FOUND in the new Main.
+	else:
+		# If we are loading a Level, the previous scene WAS a level. Clear its ref.
+		current_level_root = null
+		# Keep main_scene_root, player_node, scene_container_node as they persist.
+
+	# Always clear the general current_scene_root ref before loading the new one
+	current_scene_root = null
+
+	# --- 2. Load the new scene resource ---
+	var next_scene_res = load(target_scene_path)
+	if not next_scene_res is PackedScene: return # Abort on load error
+
+	# --- 3. Instantiate the new scene ---
+	var new_scene_instance = next_scene_res.instantiate()
+	if not is_instance_valid(new_scene_instance): return # Abort on instantiate error
+	print("  -> New scene instantiated:", new_scene_instance.name)
+
+	# --- 4. Add new scene to tree AND Set Root References ---
+	# The logic for parenting (_add_new_scene_to_tree helper) was correct.
+	# Let's integrate it here for clarity.
+	var parent_node_for_new_scene = null
+	if is_loading_main_scene:
+		parent_node_for_new_scene = get_tree().get_root()
+		main_scene_root = new_scene_instance # Store ref to Main
+		current_scene_root = main_scene_root # Update general ref
+	else:
+		# Loading a level
+		if not is_instance_valid(scene_container_node): # Must be valid now
+			printerr("SceneManager Fatal Error: Cannot add level, scene_container_node invalid!")
+			new_scene_instance.queue_free(); return
+		parent_node_for_new_scene = scene_container_node
+		current_level_root = new_scene_instance # Store ref to new LEVEL
+		current_scene_root = current_level_root # Update general ref
+
+	parent_node_for_new_scene.add_child(new_scene_instance)
+	print("  -> New scene '", new_scene_instance.name, "' added under '", parent_node_for_new_scene.name, "'")
+	# --- DEBUG: List children of root ---
+	if is_loading_main_scene:
+		print("  -> Children of root:", get_tree().get_root().get_children())
 
 	# 4. Post-Load Setup (Find nodes, position player, handle grace period)
 	if is_loading_main_scene:
@@ -141,41 +193,6 @@ func _perform_scene_change(target_scene_path: String, target_spawn_name: String)
 
 
 # --- Helper Functions ---
-
-# Frees the correct previous scene based on context.
-func _free_previous_scene(loading_main: bool) -> void:
-	var node_to_free: Node = null
-	var node_description: String = ""
-
-	if loading_main:
-		node_to_free = main_scene_root # Free previous Main/StartScreen
-		node_description = "top-level scene"
-		# Clear potentially stale references if freeing Main
-		if is_instance_valid(node_to_free):
-			_clear_all_refs() # Clear everything if Main is going away
-	else:
-		node_to_free = current_level_root # Free previous Level only
-		node_description = "LEVEL scene"
-		# Don't clear main_scene_root, player_node, scene_container_node
-
-	if is_instance_valid(node_to_free):
-		print("  -> Preparing to free previous ", node_description, ": ", node_to_free.name)
-		var parent = node_to_free.get_parent()
-		if is_instance_valid(parent):
-			parent.remove_child(node_to_free)
-		else:
-			printerr("  -> Warning: Node to free already has no parent?")
-		node_to_free.queue_free()
-	# else: No previous node to free
-
-	# Clear the specific reference that was freed
-	if loading_main:
-		main_scene_root = null
-		current_scene_root = null # Ensure this is also cleared
-	else:
-		current_level_root = null
-
-
 # Loads and instantiates a scene resource. Returns null on failure.
 func _load_scene_instance(scene_path: String) -> Node:
 	var scene_res = load(scene_path)

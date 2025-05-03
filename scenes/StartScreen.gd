@@ -38,6 +38,18 @@ func _ready() -> void:
 	else:
 		printerr("StartScreen Error: QuitButton node not found!")
 
+	# --- Tell SceneManager this IS the current scene ---
+	if SceneManager:
+		print("StartScreen: Setting self as SceneManager.current_scene_root") # DEBUG
+		SceneManager.current_scene_root = self
+		# Also ensure main scene refs are null initially in manager
+		SceneManager.main_scene_root = null
+		SceneManager.current_level_root = null
+		SceneManager.player_node = null
+		SceneManager.scene_container_node = null
+	else:
+		printerr("StartScreen Error: SceneManager not found!")
+
 	# Ensure cursor is visible on the start screen
 	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 
@@ -54,9 +66,6 @@ func _on_new_game_pressed() -> void:
 		# Use the SceneManager to handle the transition
 		# Pass the path to the main scene and the desired spawn point name
 		SceneManager.change_scene(MAIN_GAME_SCENE_PATH, INITIAL_SPAWN_NAME)
-		# Note: SceneManager's change_scene might need adjustments
-		# to handle loading the main scene (which then loads level 1)
-		# instead of directly loading a level scene.
 	else:
 		printerr("StartScreen Error: SceneManager autoload not found! Cannot start game.")
 		# Re-enable buttons if scene manager failed
