@@ -30,4 +30,4 @@ position = Vector2(255, 106)
 [node name="SceneTransitionArea" parent="." instance=ExtResource("1_mn4j2")]
 position = Vector2(259, -38)
 target_scene_path = "uid://dsc15vpurchu6"
-target_spawn_name = "FieldEntrance"
+target_spawn_name = "HomeEntrance"

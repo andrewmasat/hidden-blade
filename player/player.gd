@@ -37,6 +37,7 @@ var current_dashes: int :
 @export var dash_speed: float = 350.0
 
 # State Variables
+var character_name: String = "Ninja"
 var current_state: State = State.IDLE_RUN
 var last_direction: Vector2 = Vector2.DOWN
 var equipped_item_data: ItemData = null
@@ -217,6 +218,7 @@ func get_save_data() -> Dictionary:
 		printerr("Player Save Error: SceneManager not found!")
 
 	var save_data = {
+		"character_name": character_name,
 		"scene_path": current_level_path, # Path of the scene player is IN
 		"position_x": global_position.x,
 		"position_y": global_position.y,
@@ -237,6 +239,7 @@ func load_save_data(data: Dictionary) -> void:
 
 	# Position is set by SceneManager based on scene path/spawn name (or loaded pos)
 	# We only restore stats here.
+	character_name = data.get("character_name", "Ninja")
 	self.current_health = data.get("current_health", max_health) # Use setter for signals
 	self.current_dashes = data.get("current_dashes", max_dashes) # Use setter for signals
 	last_direction = Vector2(data.get("last_direction_x", 0), data.get("last_direction_y", 1)) # Default down
@@ -257,6 +260,13 @@ func load_save_data(data: Dictionary) -> void:
 	_update_hand_and_weapon_animation()
 
 	print("Player: Loaded save data (excluding position).") # Debug
+
+func set_character_name(new_name: String) -> void:
+	if not new_name.is_empty():
+		character_name = new_name
+		print("Player name set to:", character_name)
+	else:
+		print("Player Warning: Tried to set empty character name.")
 
 func handle_inventory_input():
 	# Cycle selection

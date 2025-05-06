@@ -1,0 +1,84 @@
+[gd_scene load_steps=4 format=3 uid="uid://bwq60313hlx8a"]
+
+[ext_resource type="Script" uid="uid://bv3no0r7ily3p" path="res://scenes/CharacterCreation.gd" id="1_r13d2"]
+
+[sub_resource type="Gradient" id="Gradient_r13d2"]
+colors = PackedColorArray(0.0338533, 0.0338533, 0.0338533, 1, 0.122252, 0.122252, 0.122252, 1)
+
+[sub_resource type="GradientTexture2D" id="GradientTexture2D_rj2gr"]
+gradient = SubResource("Gradient_r13d2")
+fill_to = Vector2(0, 1)
+
+[node name="CharacterCreation" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_r13d2")
+
+[node name="Background" type="TextureRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+texture = SubResource("GradientTexture2D_rj2gr")
+
+[node name="TitleLabel" type="Label" parent="."]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_bottom = 22.0
+grow_horizontal = 2
+theme_override_font_sizes/font_size = 64
+text = "Create Your Charactor"
+horizontal_alignment = 1
+
+[node name="BackButton" type="Button" parent="."]
+custom_minimum_size = Vector2(150, 35)
+layout_mode = 1
+anchors_preset = -1
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_right = -40.0
+offset_bottom = -40.0
+grow_horizontal = 0
+grow_vertical = 0
+theme_override_font_sizes/font_size = 26
+text = "Back
+"
+
+[node name="CreateContainer" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -20.0
+offset_top = -20.0
+offset_right = 20.0
+offset_bottom = 20.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 15
+alignment = 1
+
+[node name="NameEdit" type="LineEdit" parent="CreateContainer"]
+custom_minimum_size = Vector2(0, 35)
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+placeholder_text = "Enter Name..."
+max_length = 20
+
+[node name="ConfirmButton" type="Button" parent="CreateContainer"]
+custom_minimum_size = Vector2(150, 35)
+layout_mode = 2
+theme_override_font_sizes/font_size = 26
+text = "Start Adventure"

@@ -9,7 +9,9 @@ extends Control
 @onready var settings_button: Button = $MenuOptionsContainer/SettingsButton
 @onready var quit_button: Button = $MenuOptionsContainer/QuitButton
 
-# --- Paths (Configure These!) ---
+const CHARACTER_CREATION_PATH = "res://scenes/CharacterCreation.tscn"
+const LOAD_GAME_SCREEN_PATH = "res://scenes/LoadGameScreen.tscn"
+
 # Path to your main gameplay scene that loads levels etc.
 const MAIN_GAME_SCENE_PATH = "res://scenes/Main.tscn"
 # Name of the Marker2D within the *first level* loaded by Main.tscn
@@ -27,7 +29,7 @@ func _ready() -> void:
 		load_game_button.pressed.connect(_on_load_game_pressed)
 		# Disable if no save file exists initially
 		if SaveManager:
-			load_game_button.disabled = not SaveManager.has_save_file()
+			load_game_button.disabled = SaveManager.get_all_save_metadata().is_empty()
 		else:
 			load_game_button.disabled = true # Disable if manager missing
 
@@ -60,32 +62,13 @@ func _ready() -> void:
 # --- Signal Callbacks ---
 
 func _on_new_game_pressed() -> void:
-	print("New Game button pressed.")
-	# Disable buttons to prevent double clicks during transition
-	_set_buttons_disabled(true)
-
-	# Ensure SceneManager exists before calling
-	if SceneManager:
-		# Use the SceneManager to handle the transition
-		# Pass the path to the main scene and the desired spawn point name
-		SceneManager.change_scene(MAIN_GAME_SCENE_PATH, INITIAL_SPAWN_NAME)
-	else:
-		printerr("StartScreen Error: SceneManager autoload not found! Cannot start game.")
-		# Re-enable buttons if scene manager failed
-		_set_buttons_disabled(false)
+	print("StartScreen: New Game pressed, changing to Character Creation.")
+	get_tree().change_scene_to_file(CHARACTER_CREATION_PATH)
 
 
 func _on_load_game_pressed() -> void:
-	if SaveManager and SaveManager.has_save_file():
-		print("StartScreen: Load Game button pressed. Requesting load...")
-		_set_buttons_disabled(true) # Disable buttons during load attempt
-		SaveManager.load_game()
-		# Scene change is handled by SaveManager/SceneManager now
-	elif SaveManager:
-		print("StartScreen: Load Game button pressed, but no save file found.")
-		# TODO: Show message to player? Maybe disable button?
-	else:
-		printerr("StartScreen: SaveManager not found!")
+	print("StartScreen: Load Game pressed, changing to Load Screen.")
+	get_tree().change_scene_to_file(LOAD_GAME_SCREEN_PATH)
 
 
 func _on_settings_pressed() -> void:
@@ -99,12 +82,3 @@ func _on_settings_pressed() -> void:
 func _on_quit_pressed() -> void:
 	print("Quit button pressed.")
 	get_tree().quit() # Quit the application
-
-
-# Helper to enable/disable all menu buttons
-func _set_buttons_disabled(disabled: bool) -> void:
-	if is_instance_valid(new_game_button): new_game_button.disabled = disabled
-	if is_instance_valid(load_game_button): load_game_button.disabled = disabled # Keep disabled state if feature not ready
-	if is_instance_valid(settings_button): settings_button.disabled = disabled # Keep disabled state if feature not ready
-	# Optionally keep Quit enabled? Or disable during transition too?
-	# if is_instance_valid(quit_button): quit_button.disabled = disabled

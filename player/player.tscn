@@ -1412,7 +1412,7 @@ sprite_frames = SubResource("SpriteFrames_bjvpn")
 animation = &"idle_up"
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="."]
-position = Vector2(0, 6)
+position = Vector2(0, 3)
 shape = SubResource("CircleShape2D_oul6g")
 
 [node name="PickupArea" type="Area2D" parent="." groups=["player_pickup_area"]]
