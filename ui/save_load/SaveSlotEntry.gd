@@ -32,7 +32,7 @@ func set_data(metadata: Dictionary):
 		# Add check for valid time?
 		if save_time > 0:
 			var datetime = Time.get_datetime_dict_from_unix_time(save_time)
-			time_label.text = "%04d-%02d-%02d %02d:%02d" % [datetime.year, datetime.month, datetime.day, datetime.hour, datetime.minute]
+			time_label.text = "%02d-%02d-%04d %02d:%02d" % [datetime.month, datetime.day, datetime.year, datetime.hour, datetime.minute]
 		else:
 			time_label.text = "--:--" # Placeholder for invalid time
 	else:

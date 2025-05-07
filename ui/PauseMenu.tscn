@@ -44,21 +44,42 @@ theme_override_constants/margin_left = 50
 theme_override_constants/margin_top = 45
 theme_override_constants/margin_right = 50
 
-[node name="ButtonContainer" type="VBoxContainer" parent="MenuPanel/MarginContainer"]
+[node name="MainPauseButtons" type="VBoxContainer" parent="MenuPanel/MarginContainer"]
 layout_mode = 2
 
-[node name="ResumeButton" type="Button" parent="MenuPanel/MarginContainer/ButtonContainer"]
+[node name="ResumeButton" type="Button" parent="MenuPanel/MarginContainer/MainPauseButtons"]
 layout_mode = 2
 text = "Resume"
 
-[node name="SettingsButton" type="Button" parent="MenuPanel/MarginContainer/ButtonContainer"]
+[node name="SettingsButton" type="Button" parent="MenuPanel/MarginContainer/MainPauseButtons"]
 layout_mode = 2
 text = "Settings"
 
-[node name="SaveButton" type="Button" parent="MenuPanel/MarginContainer/ButtonContainer"]
+[node name="SaveButton" type="Button" parent="MenuPanel/MarginContainer/MainPauseButtons"]
 layout_mode = 2
 text = "Save Game"
 
-[node name="QuitToMenuButton" type="Button" parent="MenuPanel/MarginContainer/ButtonContainer"]
+[node name="QuitToMenuButton" type="Button" parent="MenuPanel/MarginContainer/MainPauseButtons"]
 layout_mode = 2
 text = "Quit to Menu"
+
+[node name="QuitConfirmContainer" type="VBoxContainer" parent="MenuPanel/MarginContainer"]
+visible = false
+layout_mode = 2
+
+[node name="ConfirmLabel" type="Label" parent="MenuPanel/MarginContainer/QuitConfirmContainer"]
+layout_mode = 2
+text = "Save progress before quitting?"
+horizontal_alignment = 1
+
+[node name="SaveAndQuitButton" type="Button" parent="MenuPanel/MarginContainer/QuitConfirmContainer"]
+layout_mode = 2
+text = "Save & Quit"
+
+[node name="QuitOnlyButton" type="Button" parent="MenuPanel/MarginContainer/QuitConfirmContainer"]
+layout_mode = 2
+text = "Quit Without Saving"
+
+[node name="CancelQuitButton" type="Button" parent="MenuPanel/MarginContainer/QuitConfirmContainer"]
+layout_mode = 2
+text = "Cancel"

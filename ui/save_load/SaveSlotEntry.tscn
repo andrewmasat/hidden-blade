@@ -3,6 +3,7 @@
 [ext_resource type="Script" uid="uid://but8q170dr0qe" path="res://ui/save_load/SaveSlotEntry.gd" id="1_edejq"]
 
 [node name="SaveSlotEntry" type="Button"]
+custom_minimum_size = Vector2(225, 50)
 offset_right = 225.0
 offset_bottom = 50.0
 script = ExtResource("1_edejq")
