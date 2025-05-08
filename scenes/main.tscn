@@ -70,7 +70,6 @@ y_sort_enabled = true
 y_sort_enabled = true
 
 [node name="City" parent="WorldYSort/Environments" instance=ExtResource("2_rarhs")]
-y_sort_enabled = true
 
 [node name="Player" parent="WorldYSort" instance=ExtResource("1_o5qli")]
 

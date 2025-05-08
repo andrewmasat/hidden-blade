@@ -62,13 +62,28 @@ func _ready() -> void:
 # --- Signal Callbacks ---
 
 func _on_new_game_pressed() -> void:
-	print("StartScreen: New Game pressed, changing to Character Creation.")
-	get_tree().change_scene_to_file(CHARACTER_CREATION_PATH)
+	print("StartScreen: New Game pressed, requesting scene change to Character Creation.")
+	if SceneManager:
+		# Use "" or a specific spawn name if Character Creation needs one (unlikely)
+		SceneManager.change_scene(CHARACTER_CREATION_PATH, "")
+	else:
+		printerr("StartScreen Error: SceneManager not found!")
 
 
 func _on_load_game_pressed() -> void:
-	print("StartScreen: Load Game pressed, changing to Load Screen.")
-	get_tree().change_scene_to_file(LOAD_GAME_SCREEN_PATH)
+	print("StartScreen: Load Game pressed, requesting scene change to Load Screen.")
+	# Check if saves exist before even attempting transition
+	if SaveManager and not SaveManager.get_all_save_metadata().is_empty():
+		if SceneManager:
+			# Use "" or a specific spawn name if Load Screen needs one (unlikely)
+			SceneManager.change_scene(LOAD_GAME_SCREEN_PATH, "")
+		else:
+			printerr("StartScreen Error: SceneManager not found!")
+	elif SaveManager:
+		print("StartScreen: Load Game button pressed, but no saves exist.")
+		# Maybe show a message? Button should be disabled anyway by _ready check.
+	else:
+		printerr("StartScreen Error: SaveManager not found!")
 
 
 func _on_settings_pressed() -> void:

@@ -47,6 +47,17 @@ var fade_player: AnimationPlayer = null
 var fade_layer_initialized: bool = false
 
 
+# Helper to check if a path likely points to a UI screen (adjust as needed)
+func _is_ui_scene(scene_path: String) -> bool:
+	# Add paths for LoadGameScreen, CharacterCreation, Settings etc.
+	return scene_path == START_SCREEN_PATH \
+		or scene_path == "res://scenes/LoadGameScreen.tscn" \
+		or scene_path == "res://scenes/CharacterCreation.tscn"
+		# Add other UI scene paths here
+
+func _ready(): # Keep empty or just fade init
+	pass
+
 # --- Public API ---
 
 ## Initiates a scene change. Called by StartScreen or SceneTransitionArea.
@@ -67,44 +78,9 @@ func change_scene(target_scene_path: String, target_spawn_name: String) -> void:
 ## Handles quitting the game scene and returning to the Start Screen.
 func return_to_start_screen() -> void:
 	print("SceneManager: Returning to Start Screen...")
-
-	# Optional: Put player in transitioning state (might not matter as node is freed)
-	if is_instance_valid(player_node) and player_node.has_method("start_scene_transition"):
-		player_node.start_scene_transition()
-
-	# Fade to black if possible
-	if await _start_fade_in():
-		# --- Clean up Gameplay Scene ---
-		# Free the ENTIRE Main scene, which contains Player, Levels, HUD, etc.
-		if is_instance_valid(main_scene_root):
-			print("  -> Freeing entire Main scene:", main_scene_root.name)
-			# Remove from tree before freeing is safer
-			if is_instance_valid(main_scene_root.get_parent()):
-				main_scene_root.get_parent().remove_child(main_scene_root)
-			main_scene_root.queue_free()
-		else:
-			printerr("SceneManager: Cannot free Main scene, reference invalid!")
-
-		# Clear ALL internal references associated with the gameplay state
-		_clear_all_refs()
-		print("  -> SceneManager references cleared.")
-
-		# --- Load and Add StartScreen ---
-		var start_scene_instance = await _load_scene_instance(START_SCREEN_PATH)
-		if is_instance_valid(start_scene_instance):
-			# Add StartScreen under the root
-			get_tree().get_root().add_child(start_scene_instance)
-			# Update current_scene_root to point to the StartScreen
-			current_scene_root = start_scene_instance # Use the correct variable
-			print("  -> StartScreen added and set as current scene root.")
-		else:
-			printerr("SceneManager CRITICAL Error: Failed to load/instantiate StartScreen! Quitting.")
-			get_tree().quit() # Quit if start screen fails
-			return
-		# current_scene_root is now the StartScreen instance
-
-		# --- Fade back out to show StartScreen ---
-		await _start_fade_out()
+	# Just trigger a normal scene change TO the start screen
+	# The _perform_scene_change logic will handle freeing Main and clearing refs.
+	change_scene(START_SCREEN_PATH, "") # Use the standard change function
 
 # --- Add New Function for Loading Saves ---
 
@@ -114,28 +90,36 @@ func load_saved_game_scene(main_scene_path: String, level_to_load_path: String, 
 	await _start_fade_in()
 
 	# --- 1. Free any existing scene ---
-	# If called from StartScreen, current_scene_root is StartScreen
-	# If somehow called from in-game (unlikely), might be Main or Level
+	print("  -> Checking current_scene_root before freeing:", current_scene_root.name if is_instance_valid(current_scene_root) else "None") # DEBUG
 	if is_instance_valid(current_scene_root):
-		print("  -> Freeing previous scene before load:", current_scene_root.name)
-		if is_instance_valid(current_scene_root.get_parent()):
-			current_scene_root.get_parent().remove_child(current_scene_root)
+		var previous_scene_name = current_scene_root.name # Store name for logging
+		# Ensure it has a parent before trying to remove
+		var parent = current_scene_root.get_parent()
+		if is_instance_valid(parent):
+			parent.remove_child(current_scene_root)
+			print("  -> Removed '", previous_scene_name, "' from parent '", parent.name, "'")
+		else:
+			printerr("  -> Warning: Previous scene '", previous_scene_name, "' had no parent?")
 		current_scene_root.queue_free()
+		print("  -> queue_free() called on '", previous_scene_name, "'.")
 	else:
-		print("  -> No previous scene found in current_scene_root to free.")
+		# This case means SceneManager's state was wrong, but proceed carefully.
+		printerr("  -> No valid previous screen found in current_scene_root to free!")
 
+	# --- 2. Clear ALL references BEFORE loading Main ---
 	_clear_all_refs() # Clear all refs before loading main
+	print("  -> Cleared all SceneManager references.")
 
-	# --- 2. Load and Add Main Scene ---
+	# --- 3. Load and Add Main Scene ---
 	var main_instance = await _load_scene_instance(main_scene_path)
 	if not is_instance_valid(main_instance): return # Error handled in helper
 
 	get_tree().get_root().add_child(main_instance)
 	main_scene_root = main_instance
 	current_scene_root = main_instance # Temporarily set root
-	print("  -> Main scene '", main_instance.name, "' added under root.")
+	print("  -> Main scene '", main_instance.name, "' added under root and set as current.")
 
-	# --- 3. Find Persistent Nodes within Main ---
+	# --- 4. Find Persistent Nodes within Main ---
 	player_node = main_scene_root.find_child("Player", true, false) as CharacterBody2D
 	scene_container_node = main_scene_root.find_child("Environments", true, false)
 	await initialize_fade_layer() # Init fade refs now
@@ -143,7 +127,7 @@ func load_saved_game_scene(main_scene_path: String, level_to_load_path: String, 
 		printerr("SceneManager Load Error: Player or Environments node missing in loaded Main scene!")
 		await _start_fade_out(); return
 
-	# --- 4. CLEAR PRE-EXISTING LEVELS from Environments node ---
+	# --- 5. CLEAR PRE-EXISTING LEVELS from Environments node ---
 	print("  -> Clearing pre-existing children from Environments container...") # DEBUG
 	for child in scene_container_node.get_children():
 		print("    -> Removing pre-existing level:", child.name) # DEBUG
@@ -151,7 +135,7 @@ func load_saved_game_scene(main_scene_path: String, level_to_load_path: String, 
 		child.queue_free() # Ensure they are freed
 	current_level_root = null # Ensure level ref is null before loading saved level
 
-	# --- 5. Load the SPECIFIC Level Scene ---
+	# --- 6. Load the SPECIFIC Level Scene ---
 	var level_instance = await _load_scene_instance(level_to_load_path) # Await load helper
 	if not is_instance_valid(level_instance): return # Error handled
 	if not is_instance_valid(scene_container_node): # Check container again
@@ -162,7 +146,7 @@ func load_saved_game_scene(main_scene_path: String, level_to_load_path: String, 
 	current_scene_root = current_level_root # Update root to the level
 	print("  -> Specific level '", level_instance.name, "' added under Environments.")
 
-	# --- 6. Apply Loaded Data ---
+	# --- 7. Apply Loaded Data ---
 	print("  -> Applying loaded data...")
 	# Apply to Player (stats, etc. - position set below)
 	if full_save_data.has("player") and player_node.has_method("load_save_data"):
@@ -174,11 +158,11 @@ func load_saved_game_scene(main_scene_path: String, level_to_load_path: String, 
 	# if full_save_data.has("quests") and QuestManager.has_method("load_save_data"):
 	#	 QuestManager.load_save_data(full_save_data["quests"])
 
-	# --- 7. Position Player ---
+	# --- 8. Position Player ---
 	player_node.global_position = player_target_pos
 	print("  -> Player positioned at loaded position:", player_target_pos)
 
-	# --- 8. End Transition State (No grace period needed for load) ---
+	# --- 9. End Transition State (No grace period needed for load) ---
 	if player_node.has_method("end_scene_transition"):
 		# Call deferred to ensure state changes apply cleanly after load setup
 		player_node.call_deferred("end_scene_transition")
@@ -194,79 +178,99 @@ func load_saved_game_scene(main_scene_path: String, level_to_load_path: String, 
 # --- Internal Scene Change Logic ---
 
 # Performs the core steps of freeing old scene, loading new, adding, and setting up.
-func _perform_scene_change(target_scene_path: String, target_spawn_name: String) -> void:
-	print("SceneManager: Performing scene change...")
+func _perform_scene_change(target_scene_path: String, target_spawn_name: String) -> void: # Mark async
+	print("SceneManager: Performing scene change to:", target_scene_path)
 	emit_signal("scene_load_started", target_scene_path)
 
 	var is_loading_main_scene = (target_scene_path == MAIN_SCENE_PATH)
+	var is_loading_ui_scene = _is_ui_scene(target_scene_path)
 
-	# 1. Free the appropriate old scene (Main or Level)
-	var node_to_free: Node = null
-	if is_loading_main_scene:
-		# If loading Main, the previously active scene was whatever current_scene_root points to (e.g., StartScreen).
-		node_to_free = current_scene_root
-		print("  -> Preparing to free previous top-level scene (current_scene_root):", node_to_free.name if is_instance_valid(node_to_free) else "None")
-		# Clear all gameplay refs as Main is being replaced/loaded fresh.
-		_clear_all_refs() # Clear everything *before* freeing the old scene root
-	else:
-		# If loading a Level, the previously active scene was the previous level.
-		node_to_free = current_level_root
-		print("  -> Preparing to free previous LEVEL scene (current_level_root):", node_to_free.name if is_instance_valid(node_to_free) else "None")
-		# Keep main_scene_root, player_node, scene_container_node, fade refs. Only clear level ref.
-		current_level_root = null
+	# Start Fade In (can happen before freeing)
+	await _start_fade_in()
 
-	# Actually free the identified node if it's valid
-	if is_instance_valid(node_to_free):
-		var old_scene_parent = node_to_free.get_parent()
+	# --- 1. Free the PREVIOUS Scene Root ---
+	# current_scene_root always holds the scene to be replaced.
+	print("  -> Checking node to free (current_scene_root): ", current_scene_root.name if is_instance_valid(current_scene_root) else "None")
+	if is_instance_valid(current_scene_root):
+		var old_scene_parent = current_scene_root.get_parent()
 		if is_instance_valid(old_scene_parent):
-			old_scene_parent.remove_child(node_to_free)
-		node_to_free.queue_free()
+			old_scene_parent.remove_child(current_scene_root)
+		current_scene_root.queue_free()
 		print("  -> queue_free() called on old scene.")
-	# else: print("  -> No valid previous scene/level node found to free.")
+	# else: print("  -> No valid previous scene found in current_scene_root to free.")
 
-	# Ensure general current_scene_root is clear before loading new
+	# --- Clear References based on WHAT WE ARE LOADING ---
+	if is_loading_main_scene or is_loading_ui_scene:
+		# If loading Main OR another UI scene, clear potentially stale gameplay refs.
+		# If loading Main, main_scene_root will be set below.
+		# If loading UI, main_scene_root should become null.
+		print("  -> Loading Main/UI, clearing gameplay references.")
+		main_scene_root = null
+		current_level_root = null
+		player_node = null
+		scene_container_node = null
+		fade_layer = null # Assume fade layer lives in Main, clear ref too
+		fade_player = null
+		fade_layer_initialized = false
+	# else: # Loading a level, only clear the old level ref (done implicitly below)
+		# print("  -> Loading Level, keeping Main/Player references.")
+		pass
+
+	# Always clear the general current_scene_root ref before loading the new one
 	current_scene_root = null
 
 	# --- 2. Load and Instantiate New Scene ---
-	# Use await as _load_scene_instance is async
 	var new_scene_instance = await _load_scene_instance(target_scene_path)
-	if not is_instance_valid(new_scene_instance): return # Abort if load failed
+	if not is_instance_valid(new_scene_instance): return
 
-	# --- 4. Add new scene to tree AND Set Root References ---
-	# The logic for parenting (_add_new_scene_to_tree helper) was correct.
-	# Let's integrate it here for clarity.
+	# --- 3. Add new scene to tree & Set References ---
 	var parent_node_for_new_scene = null
 	if is_loading_main_scene:
 		parent_node_for_new_scene = get_tree().get_root()
 		main_scene_root = new_scene_instance # Store ref to Main
-		current_level_root = null # Reset level ref
-	else:
-		# Loading a level
+		current_scene_root = main_scene_root
+		# Find gameplay nodes immediately after adding Main
+		await _setup_main_scene(target_spawn_name) # Setup finds player, container, initial level, fade
+	elif is_loading_ui_scene:
+		parent_node_for_new_scene = get_tree().get_root()
+		current_scene_root = new_scene_instance # UI scene is now the current root
+		# Make sure gameplay refs stay null
+		main_scene_root = null
+		current_level_root = null
+		player_node = null
+		scene_container_node = null
+		fade_layer = null # Fade layer reference belongs to Main scene normally
+		fade_player = null
+		fade_layer_initialized = false
+	else: # Loading a Level
 		if not is_instance_valid(scene_container_node): # Container MUST exist
 			printerr("SceneManager Fatal Error: Cannot add level, scene_container_node invalid!")
 			new_scene_instance.queue_free(); return
 		parent_node_for_new_scene = scene_container_node
-		current_level_root = new_scene_instance # Store ref to new LEVEL
+		current_level_root = new_scene_instance
+		current_scene_root = current_level_root # Level is now the current root
 
-	# Add the child
-	parent_node_for_new_scene.add_child(new_scene_instance)
-	# Set the general current_scene_root reference AFTER adding and setting specific refs
-	current_scene_root = new_scene_instance
-	print("  -> New scene '", new_scene_instance.name, "' added under '", parent_node_for_new_scene.name, "'")
-	print("  -> current_scene_root now:", current_scene_root.name) # Debug check
-
-	# --- 4. Post-Load Setup ---
-	if is_loading_main_scene:
-		# Setup Main, which finds nodes and calls initialize_fade_layer
-		await _setup_main_scene(target_spawn_name) # Must await if setup is async
+	# Add the child if parent is valid
+	if is_instance_valid(parent_node_for_new_scene):
+		parent_node_for_new_scene.add_child(new_scene_instance)
+		print("  -> New scene '", new_scene_instance.name, "' added under '", parent_node_for_new_scene.name, "'")
+		# --- DEBUG: List children ---
+		# print("  -> Children of parent:", parent_node_for_new_scene.get_children())
 	else:
-		# Setup Level transition (includes grace period await)
+		# Should not happen with root fallback, but safety check
+		printerr("SceneManager Error: Failed to determine parent node for new scene!")
+		new_scene_instance.queue_free()
+		return
+
+	# --- 4. Post-Load Setup (Only needed for Levels) ---
+	if not is_loading_main_scene and not is_loading_ui_scene:
+		# Setup level transition (includes grace period await)
 		await _setup_level_transition(target_spawn_name)
 
 	# --- Final Steps ---
 	emit_signal("scene_load_finished", current_scene_root)
 	print("SceneManager: Scene change complete.")
-	await _start_fade_out() # Fade back
+	await _start_fade_out()
 
 
 # --- Helper Functions ---

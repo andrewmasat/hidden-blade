@@ -167,6 +167,11 @@ toggle_pause={
 
 [layer_names]
 
+2d_render/layer_1="world"
+2d_render/layer_2="player"
+2d_render/layer_3="enemy"
+2d_render/layer_4="buildings"
+2d_render/layer_5="props"
 2d_physics/layer_1="World"
 2d_physics/layer_2="PlayerPhysics"
 2d_physics/layer_3="PlayerInteraction"

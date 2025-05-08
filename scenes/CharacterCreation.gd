@@ -9,9 +9,22 @@ const START_SCREEN_PATH = "res://scenes/StartScreen.tscn" # Path back to start
 const INITIAL_LEVEL_SCENE_PATH = "res://scenes/City.tscn"
 
 func _ready() -> void:
-	confirm_button.pressed.connect(_on_confirm_pressed)
-	back_button.pressed.connect(_on_back_pressed)
-	name_edit.grab_focus() # Start with focus on name input
+	# --- Tell SceneManager this IS the current scene ---
+	if SceneManager:
+		print("CharacterCreation: Setting self as SceneManager.current_scene_root") # DEBUG
+		SceneManager.current_scene_root = self
+		# Clear other refs
+		SceneManager.main_scene_root = null
+		SceneManager.current_level_root = null
+		SceneManager.player_node = null
+		SceneManager.scene_container_node = null
+	else:
+		printerr("CharacterCreation Error: SceneManager not found!")
+	# --------------------------------------------------
+
+	if is_instance_valid(confirm_button): confirm_button.pressed.connect(_on_confirm_pressed)
+	if is_instance_valid(back_button): back_button.pressed.connect(_on_back_pressed)
+	if is_instance_valid(name_edit): name_edit.grab_focus()
 
 
 func _on_confirm_pressed() -> void:
@@ -105,5 +118,9 @@ func _start_new_game(player_name: String) -> void:
 
 
 func _on_back_pressed() -> void:
-	# Go back to the start screen
-	get_tree().change_scene_to_file(START_SCREEN_PATH)
+	print("CharacterCreation: Back button pressed, requesting scene change to Start Screen.")
+	if SceneManager:
+		SceneManager.change_scene(START_SCREEN_PATH, "") # Use SceneManager
+	else:
+		printerr("CharacterCreation Error: SceneManager not found!")
+		# Fallback? get_tree().change_scene_to_file(START_SCREEN_PATH)

@@ -8,7 +8,21 @@ const START_SCREEN_PATH = "res://scenes/StartScreen.tscn"
 @onready var back_button = $BackButton
 
 func _ready() -> void:
-	back_button.pressed.connect(_on_back_pressed)
+	# --- Tell SceneManager this IS the current scene ---
+	if SceneManager:
+		print("LoadGameScreen: Setting self as SceneManager.current_scene_root") # DEBUG
+		SceneManager.current_scene_root = self
+		# Clear other refs in case they were somehow set
+		SceneManager.main_scene_root = null
+		SceneManager.current_level_root = null
+		SceneManager.player_node = null
+		SceneManager.scene_container_node = null
+	else:
+		printerr("LoadGameScreen Error: SceneManager not found!")
+	# --------------------------------------------------
+
+	if is_instance_valid(back_button): # Check instance validity
+		back_button.pressed.connect(_on_back_pressed)
 	populate_save_list()
 
 
@@ -42,9 +56,14 @@ func populate_save_list() -> void:
 
 func _on_slot_load_requested(slot_index: int) -> void:
 	print("LoadGameScreen: Load requested for slot", slot_index)
-	# Disable UI? Show loading indicator?
-	SaveManager.load_game(slot_index)
-	# Game will transition via SceneManager
+	# Disable UI?
+	if is_instance_valid(save_list_container):
+		for child in save_list_container.get_children():
+			if child is Button or child is PanelContainer: # Adjust types if needed
+				child.set_process_input(false) # A way to disable interaction
+	if is_instance_valid(back_button): back_button.disabled = true
+
+	SaveManager.load_game(slot_index) # Triggers SceneManager
 
 
 func _on_slot_delete_requested(slot_index: int) -> void:
@@ -57,4 +76,9 @@ func _on_slot_delete_requested(slot_index: int) -> void:
 
 
 func _on_back_pressed() -> void:
-	get_tree().change_scene_to_file(START_SCREEN_PATH) # Go back to start menu
+	print("LoadGameScreen: Back button pressed, requesting scene change to Start Screen.")
+	if SceneManager:
+		SceneManager.change_scene(START_SCREEN_PATH, "") # Use SceneManager
+	else:
+		printerr("LoadGameScreen Error: SceneManager not found!")
+		# Fallback? get_tree().change_scene_to_file(START_SCREEN_PATH)
