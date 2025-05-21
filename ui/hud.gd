@@ -36,16 +36,7 @@ func _ready():
 	Inventory.selected_slot_changed.connect(_on_selected_slot_changed)
 
 	# --- Connect to Player signals (Requires Player emitting signals) ---
-	# Need a way to find the player. Using groups is common.
-	# Wait a frame to ensure player might be ready.
-	await get_tree().process_frame # Or use call_deferred
-	var player = get_tree().get_first_node_in_group("player") # Assumes Player is in group "player"
-	if player:
-		# Connect signals (These need to be defined in Player.gd!)
-		if player.has_signal("health_changed"):
-			player.health_changed.connect(_on_player_health_changed)
-	else:
-		printerr("HUD could not find player node in group 'player'")
+	await get_tree().process_frame
 
 	# --- Initialize HUD state ---
 	# Update hotbar from inventory
@@ -135,7 +126,6 @@ func _on_player_health_changed(current_health: float, max_health: float):
 
 
 # --- Helper Functions ---
-
 func _update_selection_indicator(index: int):
 	if index >= 0 and index < hotbar_slot_instances.size():
 		# Position indicator over the selected slot instance
@@ -143,3 +133,20 @@ func _update_selection_indicator(index: int):
 		selection_indicator.visible = true
 	else:
 		selection_indicator.visible = false
+
+func assign_player_and_connect_signals(player_node: CharacterBody2D):
+	if not is_instance_valid(player_node):
+		printerr("HUD Error: Invalid player node assigned.")
+		return
+
+	# self.player_node_ref = player_node # Store if needed for other HUD functions
+	print("HUD: Player assigned. Connecting signals.") # Debug
+
+	# Connect signals (These need to be defined in Player.gd!)
+	if player_node.has_signal("health_changed"):
+		player_node.health_changed.connect(_on_player_health_changed)
+	# else: printerr("HUD: Player missing expected signals.")
+
+	# Update HUD with initial player values (Requires getter methods in Player.gd)
+	if player_node.has_method("get_current_health") and player_node.has_method("get_max_health"):
+		_on_player_health_changed(player_node.get_current_health(), player_node.get_max_health())

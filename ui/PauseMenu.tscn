@@ -24,7 +24,7 @@ grow_vertical = 2
 color = Color(0, 0, 0, 0.588235)
 
 [node name="MenuPanel" type="PanelContainer" parent="."]
-custom_minimum_size = Vector2(250, 200)
+custom_minimum_size = Vector2(250, 170)
 anchors_preset = 8
 anchor_left = 0.5
 anchor_top = 0.5
@@ -55,31 +55,6 @@ text = "Resume"
 layout_mode = 2
 text = "Settings"
 
-[node name="SaveButton" type="Button" parent="MenuPanel/MarginContainer/MainPauseButtons"]
-layout_mode = 2
-text = "Save Game"
-
-[node name="QuitToMenuButton" type="Button" parent="MenuPanel/MarginContainer/MainPauseButtons"]
+[node name="ConfirmQuitButton" type="Button" parent="MenuPanel/MarginContainer/MainPauseButtons"]
 layout_mode = 2
 text = "Quit to Menu"
-
-[node name="QuitConfirmContainer" type="VBoxContainer" parent="MenuPanel/MarginContainer"]
-visible = false
-layout_mode = 2
-
-[node name="ConfirmLabel" type="Label" parent="MenuPanel/MarginContainer/QuitConfirmContainer"]
-layout_mode = 2
-text = "Save progress before quitting?"
-horizontal_alignment = 1
-
-[node name="SaveAndQuitButton" type="Button" parent="MenuPanel/MarginContainer/QuitConfirmContainer"]
-layout_mode = 2
-text = "Save & Quit"
-
-[node name="QuitOnlyButton" type="Button" parent="MenuPanel/MarginContainer/QuitConfirmContainer"]
-layout_mode = 2
-text = "Quit Without Saving"
-
-[node name="CancelQuitButton" type="Button" parent="MenuPanel/MarginContainer/QuitConfirmContainer"]
-layout_mode = 2
-text = "Cancel"

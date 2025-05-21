@@ -37,11 +37,12 @@ var current_dashes: int :
 @export var dash_speed: float = 350.0
 
 # State Variables
-var character_name: String = "Ninja"
+var peer_id: int = 0
 var current_state: State = State.IDLE_RUN
 var last_direction: Vector2 = Vector2.DOWN
 var equipped_item_data: ItemData = null
 var nearby_items: Array[DroppedItem] = []
+var _synced_animation_name: String = ""
 
 # Node References
 @onready var animated_sprite = $AnimatedSprite2D
@@ -54,6 +55,20 @@ var nearby_items: Array[DroppedItem] = []
 @onready var hud = get_tree().get_first_node_in_group("HUD")
 
 func _ready():
+	peer_id = name.to_int() # This should now work as spawner names it with peer ID
+	print("Player [", name, "] ready. Peer ID:", peer_id, " Is Local Authority:", is_multiplayer_authority())
+
+	if not is_multiplayer_authority():
+		var camera = find_child("Camera2D", true, false) # Example
+		if camera: camera.enabled = false
+	else:
+		# This IS the locally controlled player
+		var camera = find_child("Camera2D", true, false)
+		if camera: camera.enabled = true
+		# SceneManager.player_node is now set by Main.gd after spawn
+		# If player needs its own initial spawn point on first adding to scene:
+		# (This is now handled by Main.gd setting local_player_node.global_position)
+
 	self.current_health = max_health
 	self._current_dashes = max_dashes
 	emit_signal("dash_charges_changed", _current_dashes, max_dashes)
@@ -73,8 +88,30 @@ func _ready():
 
 	_equip_item(Inventory.get_selected_item())
 
+
 # --- Main Loop ---
 func _physics_process(delta: float):
+	# If not multiplayer authority for this node, don't process input
+	if not is_multiplayer_authority():
+		# --- Handle Synced Animation ---
+		if is_instance_valid(animation_player):
+			var new_anim_name = animation_player.current_animation # This property is synced
+			# Check if the synced animation name has changed OR if it's playing but shouldn't be (e.g. state changed)
+			if new_anim_name != _synced_animation_name and not new_anim_name.is_empty():
+				if animation_player.has_animation(new_anim_name):
+					animation_player.play(new_anim_name)
+					_synced_animation_name = new_anim_name
+					# print_rich("[color=cyan]REMOTE Player [", name, "] Playing synced animation: ", new_anim_name, "[/color]") # DEBUG
+				# else: print_rich("[color=red]REMOTE Player [", name, "] Synced anim not found: ", new_anim_name, "[/color]")
+			elif new_anim_name.is_empty() and animation_player.is_playing():
+				# If synced animation is empty but player is still playing something, stop it or play default
+				# animation_player.stop() # Or play default like idle
+				# _synced_animation_name = ""
+				pass # Decide how to handle this case - usually current_animation won't be empty if set.
+
+		_update_hand_and_weapon_animation()
+		return
+
 	# Check if inventory is open (needs access to HUD state or a global flag)
 	var is_inventory_open = false
 	if hud and hud.has_method("is_inventory_open"): # Add is_inventory_open() to HUD.gd
@@ -203,70 +240,6 @@ func die():
 	print("Player has died!")
 	queue_free()
 
-# --- SAVE/LOAD ---
-
-# Returns a dictionary representing the player's save state
-func get_save_data() -> Dictionary:
-	var current_level_path = ""
-	if SceneManager and is_instance_valid(SceneManager.current_level_root):
-		current_level_path = SceneManager.current_level_root.scene_file_path
-		if current_level_path.is_empty():
-			printerr("Player Save Warning: SceneManager.current_level_root has empty scene_file_path!")
-	elif SceneManager:
-			printerr("Player Save Error: SceneManager.current_level_root is invalid!")
-	else:
-		printerr("Player Save Error: SceneManager not found!")
-
-	var save_data = {
-		"character_name": character_name,
-		"scene_path": current_level_path, # Path of the scene player is IN
-		"position_x": global_position.x,
-		"position_y": global_position.y,
-		"current_health": current_health,
-		"current_dashes": _current_dashes, # Save internal dash count
-		"last_direction_x": last_direction.x, # Save facing direction
-		"last_direction_y": last_direction.y,
-		# Add other things like score, quest progress flags etc. later
-	}
-	print("Player: Generated save data.") # Debug
-	return save_data
-
-# Loads player state from a dictionary. Scene change handled by SceneManager.
-func load_save_data(data: Dictionary) -> void:
-	if not data:
-		printerr("Player: Invalid save data provided.")
-		return
-
-	# Position is set by SceneManager based on scene path/spawn name (or loaded pos)
-	# We only restore stats here.
-	character_name = data.get("character_name", "Ninja")
-	self.current_health = data.get("current_health", max_health) # Use setter for signals
-	self.current_dashes = data.get("current_dashes", max_dashes) # Use setter for signals
-	last_direction = Vector2(data.get("last_direction_x", 0), data.get("last_direction_y", 1)) # Default down
-	if last_direction == Vector2.ZERO: last_direction = Vector2.DOWN # Ensure valid direction
-
-	# Reset state machine to default
-	current_state = State.IDLE_RUN
-	velocity = Vector2.ZERO
-
-	# Reset timers?
-	dash_timer.stop()
-	dash_recharge_timer.stop()
-	# Manually restart recharge timer if needed based on loaded dashes
-	if _current_dashes < max_dashes and dash_recharge_timer.is_stopped():
-		dash_recharge_timer.start() # Or maybe save/load timer remaining time? More complex.
-
-	# Ensure visual updates after loading stats
-	_update_hand_and_weapon_animation()
-
-	print("Player: Loaded save data (excluding position).") # Debug
-
-func set_character_name(new_name: String) -> void:
-	if not new_name.is_empty():
-		character_name = new_name
-		print("Player name set to:", character_name)
-	else:
-		print("Player Warning: Tried to set empty character name.")
 
 func handle_inventory_input():
 	# Cycle selection
@@ -407,26 +380,6 @@ func find_non_overlapping_drop_position(target_pos: Vector2, max_attempts: int =
 	print("Max drop attempts reached, placing at:", current_pos)
 	return current_pos
 
-# Plays the animation if it's different from the current one
-func play_animation_if_different(anim_name: String):
-	# Check if the AnimationPlayer node reference is valid AND not freed
-	if is_instance_valid(animation_player):
-		# Check if the animation exists before trying to play
-		if animation_player.has_animation(anim_name):
-			# Play only if the requested animation is not already the current one
-			if animation_player.current_animation != anim_name:
-				animation_player.play(anim_name)
-				# print("Playing animation:", anim_name) # Debug
-		else:
-			# Animation doesn't exist, play fallback
-			printerr("Animation not found:", anim_name, ". Playing idle_down fallback.")
-			var fallback_anim = "idle_down" # Define fallback
-			if animation_player.has_animation(fallback_anim) and \
-			   animation_player.current_animation != fallback_anim:
-				animation_player.play(fallback_anim)
-	else:
-		printerr("AnimationPlayer node is not valid!")
-
 
 # Called by SceneManager BEFORE starting the fade/load
 func start_scene_transition() -> void:
@@ -448,8 +401,27 @@ func is_currently_transitioning() -> bool:
 
 # Central function called whenever state or direction might change animation
 func _update_hand_and_weapon_animation():
-	var target_anim = get_target_animation() # Get animation based on current state/direction
-	play_animation_if_different(target_anim)
+	if not is_instance_valid(animation_player): return
+
+	var target_anim_name = get_target_animation() # Based on current_state, last_direction (which are synced)
+
+	if is_multiplayer_authority():
+		# Local player: determine and play the animation
+		if animation_player.current_animation != target_anim_name or not animation_player.is_playing():
+			if animation_player.has_animation(target_anim_name):
+				animation_player.play(target_anim_name)
+				# No need to set _synced_animation_name for local player,
+				# as its current_animation property will be synced out.
+			else:
+				# Play fallback for local player if target_anim_name is invalid
+				var fallback = "idle_down" # Or your default
+				if animation_player.has_animation(fallback) and animation_player.current_animation != fallback:
+					animation_player.play(fallback)
+	else:
+		# Remote player: Animation should already be playing due to the check in _physics_process
+		# This function might still be useful for other visual updates based on synced state,
+		# e.g., if weapon sprite visibility depends on current_state or animation name.
+		pass
 
 # --- Equipping ---
 func _equip_item(item_data: ItemData):
@@ -633,6 +605,8 @@ func _on_pickup_area_entered(area):
 		# --- DO NOT display a generic player prompt here ---
 		# print("Player showing generic pickup prompt") # REMOVED
 		# hud.show_interaction_prompt("Pick Up (F)") # REMOVED (or similar logic)
+	elif area.is_in_group("player_pickup_area"):
+		pass
 
 	# --- Handle other types of interactable areas if needed ---
 	# elif area.is_in_group("NPC"):
@@ -640,7 +614,7 @@ func _on_pickup_area_entered(area):
 	# elif area.is_in_group("Chest"):
 	#     hud.show_interaction_prompt("Open (F)")
 	else:
-		print("Player pickup area entered unknown area type:", area.name) # Debug
+		print("Player pickup area entered unknown/unhandled area type:", area.name, " (Owner: ", area.get_owner().name if area.get_owner() else "None", ")")
 
 func _on_pickup_area_exited(area):
 	if area is DroppedItem:

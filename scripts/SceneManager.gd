@@ -82,98 +82,6 @@ func return_to_start_screen() -> void:
 	# The _perform_scene_change logic will handle freeing Main and clearing refs.
 	change_scene(START_SCREEN_PATH, "") # Use the standard change function
 
-# --- Add New Function for Loading Saves ---
-
-func load_saved_game_scene(main_scene_path: String, level_to_load_path: String, player_target_pos: Vector2, full_save_data: Dictionary) -> void:
-	print("SceneManager: load_saved_game_scene called.")
-
-	await _start_fade_in()
-
-	# --- 1. Free any existing scene ---
-	print("  -> Checking current_scene_root before freeing:", current_scene_root.name if is_instance_valid(current_scene_root) else "None") # DEBUG
-	if is_instance_valid(current_scene_root):
-		var previous_scene_name = current_scene_root.name # Store name for logging
-		# Ensure it has a parent before trying to remove
-		var parent = current_scene_root.get_parent()
-		if is_instance_valid(parent):
-			parent.remove_child(current_scene_root)
-			print("  -> Removed '", previous_scene_name, "' from parent '", parent.name, "'")
-		else:
-			printerr("  -> Warning: Previous scene '", previous_scene_name, "' had no parent?")
-		current_scene_root.queue_free()
-		print("  -> queue_free() called on '", previous_scene_name, "'.")
-	else:
-		# This case means SceneManager's state was wrong, but proceed carefully.
-		printerr("  -> No valid previous screen found in current_scene_root to free!")
-
-	# --- 2. Clear ALL references BEFORE loading Main ---
-	_clear_all_refs() # Clear all refs before loading main
-	print("  -> Cleared all SceneManager references.")
-
-	# --- 3. Load and Add Main Scene ---
-	var main_instance = await _load_scene_instance(main_scene_path)
-	if not is_instance_valid(main_instance): return # Error handled in helper
-
-	get_tree().get_root().add_child(main_instance)
-	main_scene_root = main_instance
-	current_scene_root = main_instance # Temporarily set root
-	print("  -> Main scene '", main_instance.name, "' added under root and set as current.")
-
-	# --- 4. Find Persistent Nodes within Main ---
-	player_node = main_scene_root.find_child("Player", true, false) as CharacterBody2D
-	scene_container_node = main_scene_root.find_child("Environments", true, false)
-	await initialize_fade_layer() # Init fade refs now
-	if not is_instance_valid(player_node) or not is_instance_valid(scene_container_node):
-		printerr("SceneManager Load Error: Player or Environments node missing in loaded Main scene!")
-		await _start_fade_out(); return
-
-	# --- 5. CLEAR PRE-EXISTING LEVELS from Environments node ---
-	print("  -> Clearing pre-existing children from Environments container...") # DEBUG
-	for child in scene_container_node.get_children():
-		print("    -> Removing pre-existing level:", child.name) # DEBUG
-		scene_container_node.remove_child(child)
-		child.queue_free() # Ensure they are freed
-	current_level_root = null # Ensure level ref is null before loading saved level
-
-	# --- 6. Load the SPECIFIC Level Scene ---
-	var level_instance = await _load_scene_instance(level_to_load_path) # Await load helper
-	if not is_instance_valid(level_instance): return # Error handled
-	if not is_instance_valid(scene_container_node): # Check container again
-		printerr("SceneManager Load Error: Environments container invalid before adding level!")
-		level_instance.queue_free(); return
-	scene_container_node.add_child(level_instance)
-	current_level_root = level_instance
-	current_scene_root = current_level_root # Update root to the level
-	print("  -> Specific level '", level_instance.name, "' added under Environments.")
-
-	# --- 7. Apply Loaded Data ---
-	print("  -> Applying loaded data...")
-	# Apply to Player (stats, etc. - position set below)
-	if full_save_data.has("player") and player_node.has_method("load_save_data"):
-		player_node.load_save_data(full_save_data["player"])
-	# Apply to Inventory
-	if full_save_data.has("inventory") and Inventory.has_method("load_save_data"):
-		Inventory.load_save_data(full_save_data["inventory"])
-	# Apply to other managers (Quests, etc.)
-	# if full_save_data.has("quests") and QuestManager.has_method("load_save_data"):
-	#	 QuestManager.load_save_data(full_save_data["quests"])
-
-	# --- 8. Position Player ---
-	player_node.global_position = player_target_pos
-	print("  -> Player positioned at loaded position:", player_target_pos)
-
-	# --- 9. End Transition State (No grace period needed for load) ---
-	if player_node.has_method("end_scene_transition"):
-		# Call deferred to ensure state changes apply cleanly after load setup
-		player_node.call_deferred("end_scene_transition")
-	else:
-		printerr("SceneManager Load Error: Cannot call player.end_scene_transition()!")
-
-	emit_signal("scene_load_finished", current_level_root) # Signal loaded level
-	print("SceneManager: Load game sequence complete.")
-
-	# --- 8. Fade Out ---
-	await _start_fade_out()
 
 # --- Internal Scene Change Logic ---
 
@@ -317,32 +225,27 @@ func _add_new_scene_to_tree(scene_instance: Node, is_main: bool) -> void:
 
 # Finds persistent nodes after Main scene loads, finds initial level/spawn, positions player.
 func _setup_main_scene(initial_spawn_name: String) -> void:
-	print("  -> Setting up Main scene...")
+	print("  -> SceneManager: _setup_main_scene called for Main scene.")
 	if not is_instance_valid(main_scene_root):
-		printerr("    Error: main_scene_root invalid during setup!")
+		printerr("    Error: main_scene_root invalid during _setup_main_scene!")
 		return
 
-	# Find persistent nodes
-	player_node = main_scene_root.find_child("Player", true, false) as CharacterBody2D
 	scene_container_node = main_scene_root.find_child("Environments", true, false)
-	# Try initializing fade layer reference here
-	initialize_fade_layer() # Call helper now that Main scene exists
+	await initialize_fade_layer()
 
-	# Validate
-	if not is_instance_valid(player_node): printerr("    Error: Player node not found in Main!")
-	if not is_instance_valid(scene_container_node): printerr("    Error: Environments node not found in Main!")
+	if not is_instance_valid(scene_container_node):
+		printerr("    Error: scene_container_node invalid during _setup_main_scene!")
+		return
 
-	# Find initial level and spawn point
-	current_level_root = scene_container_node.get_child(0) if scene_container_node and scene_container_node.get_child_count() > 0 else null
+	current_level_root = scene_container_node.get_child(0) if scene_container_node.get_child_count() > 0 else null
 	if is_instance_valid(current_level_root):
-		var spawn_point = current_level_root.find_child(initial_spawn_name, true, false) as Node2D
-		var target_pos = spawn_point.global_position if is_instance_valid(spawn_point) else player_node.global_position # Fallback
-		if not is_instance_valid(spawn_point): printerr("    Warning: Initial spawn '", initial_spawn_name, "' not found.")
-		if is_instance_valid(player_node): # Check player again
-			player_node.global_position = target_pos
-			print("    -> Player positioned at initial spawn: ", target_pos)
+		print("    -> Initial level set in SceneManager:", current_level_root.name)
 	else:
-		printerr("    Error: No initial level found under Environments node!")
+		printerr("    Error: No initial level found under Environments node for Main setup!")
+	# ------------------------------------
+
+	# Player spawning and positioning is handled by Main.gd now for new game
+	print("  -> SceneManager: _setup_main_scene finished. Main.gd will handle player spawn & initial pos.")
 
 
 # Finds spawn point in the newly loaded level, positions player, handles grace period.

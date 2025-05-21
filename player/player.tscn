@@ -1,8 +1,22 @@
-[gd_scene load_steps=53 format=3 uid="uid://de0pjp7qqneue"]
+[gd_scene load_steps=54 format=3 uid="uid://de0pjp7qqneue"]
 
 [ext_resource type="Texture2D" uid="uid://bj7gor55r3qwi" path="res://assets/Actor/Characters/NinjaRed2/SpriteSheet.png" id="1_oul6g"]
 [ext_resource type="Script" uid="uid://c65ma650m0cyd" path="res://player/Player.gd" id="1_rkbax"]
 [ext_resource type="Texture2D" uid="uid://dkgyie0gd8e02" path="res://assets/Items/Weapons/Sword2/SpriteInHand.png" id="3_g1dw6"]
+
+[sub_resource type="SceneReplicationConfig" id="SceneReplicationConfig_wnvi2"]
+properties/0/path = NodePath(".:global_position")
+properties/0/spawn = true
+properties/0/replication_mode = 1
+properties/1/path = NodePath(".:last_direction")
+properties/1/spawn = true
+properties/1/replication_mode = 1
+properties/2/path = NodePath(".:current_state")
+properties/2/spawn = true
+properties/2/replication_mode = 1
+properties/3/path = NodePath("AnimationPlayer:current_animation")
+properties/3/spawn = true
+properties/3/replication_mode = 1
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_bjvpn"]
 atlas = ExtResource("1_oul6g")
@@ -1406,6 +1420,9 @@ _data = {
 y_sort_enabled = true
 collision_layer = 2
 script = ExtResource("1_rkbax")
+
+[node name="MultiplayerSynchronizer" type="MultiplayerSynchronizer" parent="."]
+replication_config = SubResource("SceneReplicationConfig_wnvi2")
 
 [node name="AnimatedSprite2D" type="AnimatedSprite2D" parent="."]
 sprite_frames = SubResource("SpriteFrames_bjvpn")
