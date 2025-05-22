@@ -1,7 +1,30 @@
-[gd_scene load_steps=4 format=3 uid="uid://bed5ijmikyryd"]
+[gd_scene load_steps=5 format=3 uid="uid://bed5ijmikyryd"]
 
 [ext_resource type="Script" uid="uid://gsl75p7wrttt" path="res://world/DroppedItem.gd" id="1_sn3gv"]
 [ext_resource type="Texture2D" uid="uid://bs3pqk2i5iih8" path="res://assets/Items/Food/Meat.png" id="2_txuh2"]
+
+[sub_resource type="SceneReplicationConfig" id="SceneReplicationConfig_ye8ad"]
+properties/0/path = NodePath(".:global_position")
+properties/0/spawn = true
+properties/0/replication_mode = 1
+properties/1/path = NodePath(".:drop_mode")
+properties/1/spawn = true
+properties/1/replication_mode = 1
+properties/2/path = NodePath(".:owner_peer_id")
+properties/2/spawn = true
+properties/2/replication_mode = 1
+properties/3/path = NodePath(".:item_unique_id")
+properties/3/spawn = true
+properties/3/replication_mode = 1
+properties/4/path = NodePath(".:visible")
+properties/4/spawn = true
+properties/4/replication_mode = 1
+properties/5/path = NodePath(".:item_identifier_synced")
+properties/5/spawn = true
+properties/5/replication_mode = 1
+properties/6/path = NodePath(".:quantity_synced")
+properties/6/spawn = true
+properties/6/replication_mode = 1
 
 [sub_resource type="CircleShape2D" id="CircleShape2D_a64hr"]
 radius = 9.0
@@ -11,7 +34,10 @@ collision_layer = 256
 collision_mask = 256
 script = ExtResource("1_sn3gv")
 
-[node name="PickupArea" type="CollisionShape2D" parent="."]
+[node name="MultiplayerSynchronizer" type="MultiplayerSynchronizer" parent="."]
+replication_config = SubResource("SceneReplicationConfig_ye8ad")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
 position = Vector2(6, 6)
 shape = SubResource("CircleShape2D_a64hr")
 
@@ -33,30 +59,31 @@ stretch_mode = 5
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = 2.0
-offset_top = 5.0
-offset_right = 24.0
-offset_bottom = 17.0
+offset_left = 4.0
+offset_top = 6.0
+offset_right = 26.0
+offset_bottom = 19.0
 grow_horizontal = 2
 grow_vertical = 2
-scale = Vector2(0.6, 0.6)
+scale = Vector2(0.5, 0.5)
 theme_override_constants/outline_size = 4
 text = "99"
 horizontal_alignment = 1
 vertical_alignment = 2
 
 [node name="PromptLabel" type="Label" parent="."]
-visible = false
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = -47.0
-offset_top = -12.0
-offset_right = 130.0
+offset_left = -29.0
+offset_top = -8.0
+offset_right = 148.0
+offset_bottom = 5.0
 grow_horizontal = 2
 grow_vertical = 2
-scale = Vector2(0.6, 0.6)
+scale = Vector2(0.4, 0.4)
 theme_override_constants/outline_size = 4
+theme_override_font_sizes/font_size = 16
 text = "Take  [F]"
 horizontal_alignment = 1
 vertical_alignment = 2

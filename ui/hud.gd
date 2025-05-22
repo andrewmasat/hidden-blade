@@ -116,7 +116,7 @@ func _on_hotbar_inventory_changed(slot_index: int, item_data: ItemData): # Add I
 			slot_node.display_item(item_data)
 			slot_node.queue_redraw() # <--- ADD THIS
 
-func _on_selected_slot_changed(new_index: int, old_index: int, item_data):
+func _on_selected_slot_changed(new_index: int, _old_index: int, _item_data):
 	_update_selection_indicator(new_index)
 
 func _on_player_health_changed(current_health: float, max_health: float):

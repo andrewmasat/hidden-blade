@@ -4,72 +4,79 @@
 # and clicks outside slots when holding a cursor item (e.g., after right-click split).
 extends Control
 
-# Optional: Reference to HUD if needed for context (like checking if panel is open).
-# Consider using signals or groups instead of direct node paths for better decoupling.
-# @onready var hud = get_node("/root/Main/HUD") # Example path
-
+var _world_drop_action_pending: bool = false
+var _item_for_pending_world_drop: ItemData = null
 
 # --- Drag and Drop Handling ---
 
 # Determines if the dragged 'data' (originating from an InventorySlot)
 # can be dropped onto this background control.
 func _can_drop_data(at_position: Vector2, data) -> bool:
-	# Allow dropping if the data indicates it's an inventory item drag.
-	# This prevents the "forbidden" cursor icon when dragging over the background.
-	var is_inventory_drag = data is Dictionary and data.get("drag_type") == "inventory_item_on_cursor"
-	# print("UIInputHandler _can_drop_data:", is_inventory_drag) # Debug
-	return is_inventory_drag
+	return data is Dictionary and data.get("drag_type") == "inventory_item_on_cursor"
 
 
 # Executes when an inventory item drag is released (dropped) onto this background control.
-func _drop_data(at_position: Vector2, data) -> void:
-	# This signifies a "world drop" initiated via drag-and-drop.
-	print("UIInputHandler: _drop_data triggered (World drop from drag).") # Debug
+func _drop_data(at_position: Vector2, data) -> void: # For DRAG operations ending on background
+	print("UIInputHandler: _drop_data triggered (World drop from DRAG).")
 
-	# The actual item being dragged is on the Inventory cursor.
-	var item_on_cursor = Inventory.get_cursor_item()
+	# This IS the primary handler for drag-to-world.
+	# Item was put on cursor by InventorySlot._get_drag_data
+	var item_to_drop_now = Inventory.get_cursor_item() # This should be the item dragged
 
-	if item_on_cursor != null:
-		# Find the player and tell them to handle the drop action.
-		var player = get_tree().get_first_node_in_group("player")
-		if player and player.has_method("handle_world_drop"):
-			player.handle_world_drop(item_on_cursor)
-			Inventory.clear_cursor_item() # Clear cursor after successful drop
-		else:
-			printerr("UIInputHandler _drop_data: Player/handle_world_drop not found!")
-			Inventory.clear_cursor_item() # Clear cursor anyway on error
+	if item_to_drop_now != null:
+		# Set up for world drop, clear cursor, and mark action as handled
+		_item_for_pending_world_drop = item_to_drop_now
+		_world_drop_action_pending = true # Mark that a world drop needs to happen
+		Inventory.clear_cursor_item() # Clear the client's cursor immediately
+		print("UIInputHandler _drop_data: Local cursor cleared. World drop action is pending.")
 	else:
-		# This indicates a state mismatch - DnD completed but cursor was already empty.
-		printerr("UIInputHandler _drop_data: Drop detected but cursor item is null!")
+		printerr("UIInputHandler _drop_data: Cursor was already empty at DnD drop!")
 
-	# No need to call accept_event() here; the DnD system handles it via _drop_data.
+	accept_event() # Consume the DnD drop event fully
 
+	# Let _process or a timer handle the pending drop to avoid re-entrancy
+	# For simplicity, let's try _process first.
+	# If _process doesn't work well, a short one-shot timer is an option.
+	# No, _process is bad for input-triggered things. Let's try deferred call.
+	if _world_drop_action_pending:
+		call_deferred("_execute_pending_world_drop")
+
+
+func _execute_pending_world_drop():
+	if not _world_drop_action_pending or not is_instance_valid(_item_for_pending_world_drop):
+		_world_drop_action_pending = false # Reset if item became invalid
+		_item_for_pending_world_drop = null
+		return
+
+	print("UIInputHandler: Executing deferred world drop for:", _item_for_pending_world_drop.item_id)
+	var local_player = SceneManager.player_node
+	if is_instance_valid(local_player) and local_player.is_multiplayer_authority():
+		if local_player.has_method("handle_world_drop"):
+			local_player.handle_world_drop(_item_for_pending_world_drop, DroppedItem.DropMode.GLOBAL, 0)
+		# else: printerr(...)
+	# else: printerr(...)
+
+	_world_drop_action_pending = false # Reset flag
+	_item_for_pending_world_drop = null
 
 # --- Input Handling ---
 
 # Handles input events, primarily for detecting clicks outside slots
 # when holding an item from a non-drag source (like right-click split).
 func _input(event: InputEvent) -> void:
-	# Check for Left Mouse Button RELEASE.
+	# This _input now ONLY handles NON-DRAG world drops (e.g., after right-click split)
+	if _world_drop_action_pending: # If a DnD drop is being processed, ignore other clicks
+		# print("UIInputHandler _input: Ignoring input, world drop action pending from DnD.")
+		return
+
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
-
-		# Check if we are CURRENTLY holding an item (e.g., from a right-click split).
 		var item_on_cursor = Inventory.get_cursor_item()
-		# Check if a drag operation was JUST completed in this frame.
-		# If gui_get_drag_data() returns non-null here, it means a DnD operation
-		# likely concluded (either successfully on a slot/background or failed).
-		var drag_data_at_release = get_viewport().gui_get_drag_data()
+		var drag_data_at_release = get_viewport().gui_get_drag_data() # Check if Godot DnD just ended
 
-		# --- Handle World Drop from Non-Drag Cursor Item ---
-		# Only proceed if:
-		# 1. An item IS on the cursor.
-		# 2. A drag operation did NOT just conclude (drag_data is null).
+		# This path is for clicking on world with item from SPLIT (drag_data_at_release should be null)
 		if item_on_cursor != null and drag_data_at_release == null:
 			var release_pos = get_global_mouse_position()
-			# Check what's under the mouse at release point.
-			var control_under_mouse = _find_control_at_position(release_pos) # Use helper
-
-			# Determine if the click landed on a slot or panel background.
+			var control_under_mouse = _find_control_at_position(release_pos)
 			var on_valid_ui_target = false
 			if control_under_mouse != null:
 				var current = control_under_mouse
@@ -82,17 +89,17 @@ func _input(event: InputEvent) -> void:
 
 			# If the release was NOT on a slot/panel, trigger world drop for the cursor item.
 			if not on_valid_ui_target:
-				print("UIInputHandler _input: World Drop from CURSOR item (Non-Drag Release) detected.") # Debug
-				var player = get_tree().get_first_node_in_group("player")
-				if player and player.has_method("handle_world_drop"):
-					player.handle_world_drop(item_on_cursor)
-					Inventory.clear_cursor_item()
-					# Consume this specific input event, as we handled it directly.
+				print("UIInputHandler _input: World Drop from CURSOR item (Non-Drag/Split Release) detected.")
+				var local_player = SceneManager.player_node # ... (get local player with authority) ...
+				if is_instance_valid(local_player) and local_player.is_multiplayer_authority():
+					var data_for_drop = item_on_cursor
+					Inventory.clear_cursor_item() # Clear LOCAL cursor
+					local_player.handle_world_drop(data_for_drop, DroppedItem.DropMode.GLOBAL, 0)
 					get_viewport().set_input_as_handled()
 				else:
-					printerr("UIInputHandler _input: Player/handle_world_drop not found!")
-					Inventory.clear_cursor_item() # Clear cursor on error
-					get_viewport().set_input_as_handled() # Consume anyway
+					printerr("UIInputHandler _input: Could not find valid LOCAL player node for cursor item world drop!")
+					Inventory.clear_cursor_item()
+					get_viewport().set_input_as_handled()
 			# else: The release was on a slot/panel, let that control handle it via its own input/signals.
 
 

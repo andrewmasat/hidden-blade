@@ -8,7 +8,7 @@ extends Control
 @onready var settings_button: Button = $MenuOptionsContainer/SettingsButton
 @onready var quit_button: Button = $MenuOptionsContainer/QuitButton
 @onready var ip_address_edit: LineEdit = $MenuOptionsContainer/HBoxContainer/IPAddressEdit
-@onready var host_button: Button = $MenuOptionsContainer/HBoxContainer/HostButton
+@onready var host_button: Button = $MenuOptionsContainer/HostButton
 @onready var join_button: Button = $MenuOptionsContainer/HBoxContainer/JoinButton
 
 const CHARACTER_CREATION_PATH = "res://scenes/CharacterCreation.tscn"

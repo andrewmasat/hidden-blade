@@ -1,4 +1,6 @@
 # player.gd
+class_name Player
+
 extends CharacterBody2D
 
 const DebugItemResource = preload("res://items/consumable_potion_health.tres")
@@ -36,6 +38,8 @@ var current_dashes: int :
 @export var speed: float = 100.0
 @export var dash_speed: float = 350.0
 
+@export var temp_inventory_items: Array = []
+
 # State Variables
 var peer_id: int = 0
 var current_state: State = State.IDLE_RUN
@@ -43,6 +47,7 @@ var last_direction: Vector2 = Vector2.DOWN
 var equipped_item_data: ItemData = null
 var nearby_items: Array[DroppedItem] = []
 var _synced_animation_name: String = ""
+var _is_currently_processing_world_drop: bool = false
 
 # Node References
 @onready var animated_sprite = $AnimatedSprite2D
@@ -56,7 +61,7 @@ var _synced_animation_name: String = ""
 
 func _ready():
 	peer_id = name.to_int() # This should now work as spawner names it with peer ID
-	print("Player [", name, "] ready. Peer ID:", peer_id, " Is Local Authority:", is_multiplayer_authority())
+	print("Player [", name, "] _ready. Peer ID:", peer_id, " Is Auth:", is_multiplayer_authority(), " Initial GlobalPos:", global_position.round())
 
 	if not is_multiplayer_authority():
 		var camera = find_child("Camera2D", true, false) # Example
@@ -164,8 +169,25 @@ func _physics_process(delta: float):
 
 	_update_hand_and_weapon_animation()
 
+var next_drop_is_personal = false # Add this var
+
+func _unhandled_input(event): # Or _input
+	if event.is_action_pressed("toggle_personal_drop_debug"): # New debug input action
+		next_drop_is_personal = not next_drop_is_personal
+		print("Next drop will be personal:", next_drop_is_personal)
+
+
+@rpc("authority", "call_local", "reliable") # Only the authority (client for its own player) executes this
+func set_initial_network_position(pos: Vector2):
+	if not is_multiplayer_authority(): # Should only be called on the authority
+		printerr("Player [", name, "] received set_initial_network_position but is not authority. Ignored.")
+		return
+	global_position = pos
+	print("Player [", name, "] initial network position SET to:", pos, "by RPC.")
+
+
 # --- State Processing ---
-func process_idle_run_state(delta: float):
+func process_idle_run_state(_delta: float):
 	# Check for state transitions FIRST
 	if Input.is_action_just_pressed("attack"):
 		start_attack()
@@ -187,10 +209,10 @@ func process_idle_run_state(delta: float):
 	else:
 		velocity = velocity.move_toward(Vector2.ZERO, speed)
 
-func process_dash_state(delta: float):
+func process_dash_state(_delta: float):
 	pass # Movement handled by move_and_slide
 
-func process_attack_state(delta: float):
+func process_attack_state(_delta: float):
 	velocity = Vector2.ZERO
 	pass # State ends on animation finish
 
@@ -231,10 +253,10 @@ func take_damage(amount: float):
 func heal(amount: float) -> bool:
 	var previous_health = current_health
 	self.current_health += amount # Use the setter (which handles clamping & signal)
-	var health_changed = (current_health > previous_health) # Check if health increased
+	var current_health_changed = (current_health > previous_health) # Check if health increased
 	if health_changed:
-		print("Player healed, health:", current_health)
-	return health_changed # Return whether health actually changed
+		print("Player healed, health:", current_health_changed)
+	return current_health_changed # Return whether health actually changed
 
 func die():
 	print("Player has died!")
@@ -268,47 +290,236 @@ func handle_inventory_input():
 	if Input.is_action_just_pressed("inventory_slot_9"):
 		Inventory.set_selected_slot(8)
 
-func handle_world_drop(item_data_dropped: ItemData):
-	if item_data_dropped == null or not item_data_dropped is ItemData:
-		printerr("Player handle_world_drop: Received invalid item data.")
+
+@rpc("any_peer", "call_local", "reliable") # Any peer can call, server executes it locallyerver
+func server_handle_item_drop_request(item_identifier: String, item_quantity: int, drop_mode_int: int, intended_owner_peer_id: int):
+	if multiplayer.get_unique_id() != 1 and not multiplayer.is_server(): return # Should only run on server
+
+	print("Player (Server Peer ID:", multiplayer.get_unique_id(), "): Received drop request for item identifier:'", item_identifier, "' qty:", item_quantity, "from sender:", multiplayer.get_remote_sender_id())
+
+	var item_base_res: ItemData = null
+	if item_identifier.begins_with("res://"): # It's likely a resource path
+		item_base_res = load(item_identifier)
+	else: # Assume it's an item_id, use ItemDatabase
+		if ItemDatabase: # Check if ItemDatabase Autoload exists
+			item_base_res = ItemDatabase.get_item_base(item_identifier)
+		else:
+			printerr("  -> Server Error: ItemDatabase not found, cannot lookup item by ID:", item_identifier)
+			return
+
+	if not item_base_res is ItemData:
+		printerr("  -> Server Error: Could not load/find ItemData for identifier '", item_identifier, "'")
 		return
 
-	print("Player handling world drop for:", item_data_dropped.item_id)
+	var item_instance_for_drop = item_base_res.duplicate()
+	item_instance_for_drop.quantity = item_quantity
 
-	# Uses the same logic as try_drop_selected_item, but item is already "removed" (was on cursor)
-	if DroppedItemScene == null:
-		printerr("DroppedItemScene not preloaded! Cannot drop item.")
-		# Try putting item back? Might fail if inventory full.
-		Inventory.add_item(item_data_dropped)
+	# Get DroppedItemSpawner (still need to get it relative to Main)
+	# and Main node for ID generation
+	if not is_instance_valid(SceneManager) or not is_instance_valid(SceneManager.main_scene_root):
+		printerr("  -> Server Error: SceneManager or SceneManager.main_scene_root is invalid!")
 		return
 
-	var current_level_node = SceneManager.current_level_root
-	if not is_instance_valid(current_level_node):
-		printerr("handle_world_drop Error: Cannot find current level node via SceneManager!")
-		# Try putting item back as fallback
-		Inventory.add_item(item_data_dropped)
+	var main_node_ref = SceneManager.main_scene_root # Use the reference from SceneManager
+
+	var dropped_item_spawner = main_node_ref.find_child("DroppedItemSpawner", true, false) # Find spawner as child of Main
+	if not is_instance_valid(dropped_item_spawner):
+		printerr("  -> Server Error: DroppedItemSpawner not found as child of Main node!")
 		return
 
-	var dropped_item_instance = DroppedItemScene.instantiate()
-
-	# Determine drop position (slightly in front of player)
+	# Determine drop position (relative to THIS player instance on the server)
 	var drop_offset = last_direction.normalized() * 25.0
 	if drop_offset == Vector2.ZERO: drop_offset = Vector2(25, 0)
-	var initial_drop_position = global_position + drop_offset
-	var final_drop_position = find_non_overlapping_drop_position(initial_drop_position)
+	var drop_position = global_position + drop_offset # Use 'self.global_position'
 
-	current_level_node.add_child(dropped_item_instance)
-	print("  -> Dropped item added as child of:", current_level_node.name) # Debug
+	# --- Generate Unique ID using the correct Main node reference ---
+	if not main_node_ref.has_method("generate_unique_dropped_item_id"):
+		printerr("  -> Server Error: Main node (via SceneManager) missing 'generate_unique_dropped_item_id' method!")
+		return
+	var new_item_id_str = main_node_ref.generate_unique_dropped_item_id()
+	# --------------------------------------------------------------
+
+	var spawn_custom_data = {
+		"item_identifier": item_identifier,
+		"item_quantity": item_quantity,
+		"drop_mode_int": drop_mode_int,
+		"owner_peer_id": intended_owner_peer_id,
+		"item_unique_id": new_item_id_str,
+		"position_x": drop_position.x,
+		"position_y": drop_position.y
+	}
+
+	dropped_item_spawner.spawn(spawn_custom_data)
+	print("  -> Server requested DroppedItemSpawner to spawn item with gameplay ID:", new_item_id_str)
+
+
+@rpc("any_peer", "call_local", "reliable")
+func server_request_pickup_item_by_id(item_unique_id_to_pickup: String):
+	if not multiplayer.is_server(): return
+
+	var requesting_peer_id = multiplayer.get_remote_sender_id()
+	if requesting_peer_id == 0 and multiplayer.get_unique_id() == 1: requesting_peer_id = 1
+
+	print("Server: Received pickup request for item_unique_id '", item_unique_id_to_pickup, "' from peer [", requesting_peer_id, "]")
+
+	var item_node_to_pickup: DroppedItem = null
+	# Get the parent node where dropped items are spawned (e.g., WorldYSort under Main)
+	# This path needs to be robust. Assume Main node has DroppedItemSpawner, get its spawn_path.
+	var main_node = SceneManager.main_scene_root # Get main node reference
+	if not is_instance_valid(main_node): printerr("ServerPickup: Main node reference is invalid!"); return
+	var player_spawner_node = main_node.find_child("PlayerSpawner", true, false)
+	if not is_instance_valid(player_spawner_node): printerr("ServerPickup: PlayerSpawner not found!"); return
+	var player_spawn_parent = player_spawner_node.get_node(player_spawner_node.spawn_path) if not player_spawner_node.spawn_path.is_empty() else player_spawner_node
+	if not is_instance_valid(player_spawn_parent): printerr("ServerPickup: Player spawn parent invalid!"); return
+	var target_player_node_on_server = player_spawn_parent.get_node_or_null(str(requesting_peer_id)) as Player
+
+	if not is_instance_valid(target_player_node_on_server):
+		printerr("ServerPickup: Could not find player node '", str(requesting_peer_id), "' on server.")
+		return
+
+	var dropped_item_spawner = main_node.find_child("DroppedItemSpawner", true, false)
+	if not is_instance_valid(dropped_item_spawner): printerr("ServerPickup: DroppedItemSpawner not found!"); return
+
+	var actual_spawn_parent: Node = null
+	if dropped_item_spawner.spawn_path.is_empty() or dropped_item_spawner.spawn_path == NodePath("."):
+		actual_spawn_parent = dropped_item_spawner
+	else:
+		actual_spawn_parent = dropped_item_spawner.get_node_or_null(dropped_item_spawner.spawn_path)
+
+	if not is_instance_valid(actual_spawn_parent):
+		printerr("ServerPickup: Actual spawn parent for dropped items is invalid!")
+		return
+
+	for child in actual_spawn_parent.get_children():
+		if child is DroppedItem and child.item_unique_id == item_unique_id_to_pickup:
+			item_node_to_pickup = child
+			break
+
+	if not is_instance_valid(item_node_to_pickup):
+		printerr("ServerPickup: Item with unique_id '", item_unique_id_to_pickup, "' not found.")
+		return
+
+	var actual_item_data_instance = item_node_to_pickup.get_item_data() # Calls getter for _local_item_data_instance
+	if not is_instance_valid(actual_item_data_instance):
+		printerr("ServerPickup: Item node '", item_unique_id_to_pickup, "' has NO VALID _local_item_data_instance! (Value from get_item_data():", actual_item_data_instance, ")")
+		# This means _reconstruct_local_item_data failed or wasn't called yet on server for this item.
+		return
+
+	# --- Check ownership for personal items ---
+	if item_node_to_pickup.drop_mode == DroppedItem.DropMode.PERSONAL and \
+	   item_node_to_pickup.owner_peer_id != 0 and \
+	   item_node_to_pickup.owner_peer_id != requesting_peer_id:
+		print("ServerPickup: Player [", requesting_peer_id, "] tried to pick up personal item of player [", item_node_to_pickup.owner_peer_id, "]")
+		# Optionally, send an RPC back to the client: "pickup_denied_not_owner"
+		return # Deny pickup
 	# -----------------------------------------
 
-	# Initialize the dropped item with data AND position
-	if dropped_item_instance.has_method("initialize"):
-		# Position is set correctly within initialize now
-		dropped_item_instance.initialize(item_data_dropped, final_drop_position)
+	var data_to_add_to_inventory = item_node_to_pickup.get_item_data()
+
+	# --- Server-Side "Add to Inventory" (Placeholder Logic) ---
+	# This part needs to represent the server updating its authoritative state.
+	# For now, we assume success and then tell the client.
+	var server_add_successful = true # Assume server can always add it for now
+
+	if server_add_successful:
+		# (Example using temp_inventory_items on the server's Player node for player 'requesting_peer_id')
+		# target_player_node_on_server.temp_inventory_items.append({"item_id": data_to_add_to_inventory.item_id, "quantity": data_to_add_to_inventory.quantity})
+		# target_player_node_on_server.notify_property_list_changed()
+		print("  -> Server: Item added to peer [", requesting_peer_id, "]'s authoritative data.")
+
+		var item_identifier_for_client = data_to_add_to_inventory.resource_path
+		if item_identifier_for_client.is_empty():
+			item_identifier_for_client = data_to_add_to_inventory.item_id
+		var quantity_for_client = data_to_add_to_inventory.quantity
+
+		# --- DIFFERENTIATE SERVER/HOST ACTION ---
+		if requesting_peer_id == multiplayer.get_unique_id(): # Server (host) is picking up for itself
+			print("  -> Server (Host) picking up for self. Calling client_add_item_to_inventory directly.")
+			# Call the method directly on its own instance.
+			# 'self' here refers to the Player node instance that received the original RPC
+			# (server_request_pickup_item_by_id). If the host itself sent that RPC,
+			# then 'self' IS the host's player.
+			# However, this function is an RPC handler. The 'self' here isn't necessarily
+			# target_player_node_on_server if a client called this server_request... RPC.
+			#
+			# The 'target_player_node_on_server' IS the correct instance (node "1" for host).
+			if target_player_node_on_server.is_multiplayer_authority(): # Should be true for host's own node
+				target_player_node_on_server.client_add_item_to_inventory(item_identifier_for_client, quantity_for_client)
+			else:
+				# This case is strange, means host doesn't have authority over its own player node "1"
+				printerr("  -> Server (Host) picking up, but target_player_node_on_server (node '1') reports no authority!")
+		else: # Server processing pickup for a REMOTE client
+			print("  -> Server: Sending RPC client_add_item_to_inventory to remote PlayerNode '", target_player_node_on_server.name, "'")
+			target_player_node_on_server.rpc("client_add_item_to_inventory", item_identifier_for_client, quantity_for_client)
+		# -----------------------------------------
+
+		item_node_to_pickup.queue_free()
 	else:
-		printerr("DroppedItem instance missing initialize method!")
-		dropped_item_instance.queue_free() # Clean up invalid instance
-		Inventory.add_item(item_data_dropped) # Try to put item back
+		print("ServerPickup: Server-side inventory full for player [", requesting_peer_id, "].")
+		# TODO: Send RPC back to client: "pickup_failed_inventory_full"
+
+
+@rpc("any_peer", "call_local", "reliable")
+func client_add_item_to_inventory(item_identifier: String, quantity: int):
+	if not is_multiplayer_authority(): return
+
+	print("Player [", name, "] (Client Only): Received command to add item to local inventory. ID:", item_identifier, "Qty:", quantity)
+
+	var item_base_res: ItemData = null
+	if item_identifier.begins_with("res://"):
+		item_base_res = load(item_identifier)
+	elif ItemDatabase:
+		item_base_res = ItemDatabase.get_item_base(item_identifier)
+
+	if item_base_res is ItemData:
+		var item_instance_to_add = item_base_res.duplicate()
+		item_instance_to_add.quantity = quantity
+		
+		var success = Inventory.add_item(item_instance_to_add) # Add to local Inventory singleton
+		if success:
+			print("  -> Item successfully added to local client inventory.")
+			# TODO: Play pickup sound/UI feedback
+		else:
+			print("  -> Failed to add item to local client inventory (Inventory full?). This indicates a desync with server state.")
+			# This case is problematic - server thought it could be added.
+			# Might need server to handle "inventory full" responses.
+	else:
+		printerr("Player [", name, "] (Client): Could not reconstruct item from identifier '", item_identifier, "' for local inventory.")
+
+
+func handle_world_drop(item_data_to_drop: ItemData, p_drop_mode: DroppedItem.DropMode = DroppedItem.DropMode.GLOBAL, p_owner_peer_id: int = 0):
+	if not is_multiplayer_authority():
+		printerr("Player [", name, "] handle_world_drop called but not authority.")
+		return
+	if item_data_to_drop == null or not item_data_to_drop is ItemData:
+		printerr("Player [", name, "] handle_world_drop: Invalid item data provided.")
+		return
+
+	if _is_currently_processing_world_drop:
+		print("Player [", name, "] handle_world_drop: Already processing a world drop. Ignoring.") # DEBUG
+		return
+	_is_currently_processing_world_drop = true
+
+	print("Player (Client) [", name, "]: handle_world_drop initiated. Requesting server to drop item:", item_data_to_drop.item_id, "Qty:", item_data_to_drop.quantity)
+
+	# Determine identifier (path or ID)
+	var identifier = item_data_to_drop.resource_path
+	if identifier.is_empty(): identifier = item_data_to_drop.item_id
+	if identifier.is_empty():
+		printerr("Player [", name, "] handle_world_drop: Item has no identifier!")
+		_is_currently_processing_world_drop = false # Reset flag
+		return
+
+	# Determine owner for personal drops
+	var final_owner_id = p_owner_peer_id
+	if p_drop_mode == DroppedItem.DropMode.PERSONAL and final_owner_id == 0:
+		final_owner_id = multiplayer.get_unique_id()
+
+	rpc_id(1, "server_handle_item_drop_request", identifier, item_data_to_drop.quantity, p_drop_mode, final_owner_id)
+
+	_is_currently_processing_world_drop = false
+	print("Player (Client) [", name, "]: World drop RPC sent, _is_currently_processing_world_drop reset.")
+
 
 # --- Helper Functions ---
 func get_target_animation() -> String:
@@ -535,47 +746,59 @@ func try_drop_selected_item():
 		print("No item selected to drop via key.")
 
 
-# --- NEW: Pickup Item Logic ---
-func try_pickup_nearby_item():
+func try_pickup_nearby_item() -> void:
+	if not is_multiplayer_authority(): return # Only local player can initiate pickup
 	if nearby_items.is_empty():
-		# print("No items nearby to pick up.") # Optional debug
+		# print("Player [", name, "]: No items nearby to pick up.") # Optional debug
 		return
 
-	# Try picking up the first item in the list (could implement closest logic later)
-	# Important: Iterate carefully if removing while looping. Let's take the first.
-	var item_node_to_pickup: DroppedItem = nearby_items[0]
+	var item_to_remove_from_list: DroppedItem = null
 
-	# Ensure the node hasn't been freed already by another process
-	if not is_instance_valid(item_node_to_pickup):
-		printerr("Nearby item instance is invalid!")
-		nearby_items.pop_front() # Remove invalid entry
-		return # Try again next frame if needed
+	# --- Find the closest valid DroppedItem ---
+	var closest_item: DroppedItem = null
+	var min_distance_sq = INF # Using squared distance for efficiency
 
-	var data_to_add: ItemData = item_node_to_pickup.get_item_data()
+	for item_node_idx in range(nearby_items.size() - 1, -1, -1): # Iterate backwards for safe removal
+		var item_node = nearby_items[item_node_idx]
+		if not is_instance_valid(item_node):
+			nearby_items.remove_at(item_node_idx) # Clean up invalid refs
+			continue
 
-	if data_to_add != null and data_to_add is ItemData:
-		print("Player attempting to pick up:", data_to_add.item_id, "Qty:", data_to_add.quantity)
+		# Check if this item is pick-up-able by THIS player
+		# (e.g., global, or personal and owned by me)
+		var local_peer_id = multiplayer.get_unique_id()
+		var can_interact_with_this_item = false
+		if item_node.drop_mode == DroppedItem.DropMode.GLOBAL:
+			can_interact_with_this_item = true
+		elif item_node.drop_mode == DroppedItem.DropMode.PERSONAL and item_node.owner_peer_id == local_peer_id:
+			can_interact_with_this_item = true
 
-		# Important: Duplicate the data if add_item doesn't handle it,
-		# because we will free the original node holding the data.
-		# Let's assume Inventory.add_item makes its own copy if needed.
-		var success = Inventory.add_item(data_to_add)
+		if not can_interact_with_this_item:
+			continue # Skip items I can't interact with
 
-		if success:
-			print("  -> Pickup successful!")
-			# Remove from nearby list BEFORE freeing the node
-			nearby_items.erase(item_node_to_pickup)
-			# Remove the item from the game world
-			item_node_to_pickup.queue_free()
-			# TODO: Play pickup sound/effect
-		else:
-			print("  -> Inventory full, cannot pick up.")
-			# TODO: Display "Inventory Full" message to player
+		var distance_sq = global_position.distance_squared_to(item_node.global_position)
+		if distance_sq < min_distance_sq:
+			min_distance_sq = distance_sq
+			closest_item = item_node
+
+		if is_instance_valid(closest_item): # If we found one
+			item_to_remove_from_list = closest_item # Mark for removal later
+			break # Found the one to try picking up
+	# -----------------------------------------
+
+	if is_instance_valid(closest_item):
+		print("Player [", name, "] trying to pick up closest item ID:", closest_item.item_unique_id, " (Name:", closest_item.name, ")")
+		# Send RPC to server with the item's UNIQUE ID
+		# Ensure item_unique_id is not empty
+		if closest_item.item_unique_id.is_empty():
+			printerr("Player [", name, "]: Closest item has no unique ID set!")
+			return
+		rpc_id(1, "server_request_pickup_item_by_id", closest_item.item_unique_id) # NEW RPC name
+		if item_to_remove_from_list in nearby_items: # Check again, might have been removed above
+			nearby_items.erase(item_to_remove_from_list)
 	else:
-		printerr("Could not get valid ItemData from nearby item node!")
-		# Remove potentially corrupted item from list and maybe world?
-		nearby_items.erase(item_node_to_pickup)
-		item_node_to_pickup.queue_free()
+		print("Player [", name, "]: No pick-up-able items found nearby (after filtering).")
+
 
 # --- Signal Callbacks ---
 func _on_dash_timer_timeout():
@@ -595,16 +818,10 @@ func _on_dash_recharge_timer_timeout():
 		print("Dash charges full.")
 
 func _on_pickup_area_entered(area):
-	# Check if the overlapping area is a DroppedItem
 	if area is DroppedItem:
-		# --- Item Handles Its Own Prompt ---
-		# Add to nearby list for pickup logic, but DON'T show a player-level prompt.
 		if not area in nearby_items:
-			print("Player detected nearby DroppedItem:", area.get_item_data().item_id) # Debug
+			# print("Item entered pickup range:", area.item_unique_id) # Debug
 			nearby_items.append(area)
-		# --- DO NOT display a generic player prompt here ---
-		# print("Player showing generic pickup prompt") # REMOVED
-		# hud.show_interaction_prompt("Pick Up (F)") # REMOVED (or similar logic)
 	elif area.is_in_group("player_pickup_area"):
 		pass
 
@@ -619,22 +836,20 @@ func _on_pickup_area_entered(area):
 func _on_pickup_area_exited(area):
 	if area is DroppedItem:
 		if area in nearby_items:
-			print("Player no longer near DroppedItem:", area.get_item_data().item_id) # Debug
-			nearby_items.erase(area) # Remove by value
-		# --- DO NOT hide a generic player prompt here for items ---
-		# hud.hide_interaction_prompt() # REMOVED (or similar logic)
+			# print("Item exited pickup range:", area.item_unique_id) # Debug
+			nearby_items.erase(area)
 
 	# --- Handle other types ---
 	# elif area.is_in_group("NPC") or area.is_in_group("Chest"):
 	#     hud.hide_interaction_prompt()
 
-func _on_animation_finished(anim_name: String):
+func _on_animation_finished(_anim_name: String):
 	# Keep existing attack animation logic
 	if current_state == State.ATTACK and animated_sprite.animation.begins_with("attack_"):
 		current_state = State.IDLE_RUN
 		_update_hand_and_weapon_animation()
 
-func _on_selected_slot_changed(new_index: int, old_index: int, item_data: ItemData):
+func _on_selected_slot_changed(_new_index: int, _old_index: int, item_data: ItemData):
 	print("Player detected selected slot change. New Item:", item_data)
 	# --- KEEP CHECK FOR DRAG FLAG ---
 	if Inventory.is_dragging_selected_slot and item_data == null:

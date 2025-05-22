@@ -72,6 +72,10 @@ spawn_path = NodePath("..")
 [node name="Environments" type="Node2D" parent="WorldYSort"]
 y_sort_enabled = true
 
+[node name="DroppedItemSpawner" type="MultiplayerSpawner" parent="WorldYSort/Environments"]
+_spawnable_scenes = PackedStringArray("uid://bed5ijmikyryd")
+spawn_path = NodePath("..")
+
 [node name="City" parent="WorldYSort/Environments" instance=ExtResource("2_rarhs")]
 
 [node name="FadeLayer" type="CanvasLayer" parent="." groups=["FadeLayer"]]

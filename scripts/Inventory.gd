@@ -39,7 +39,6 @@ func add_item(item_data_to_add: ItemData) -> bool:
 		return false
 
 	var item_id = item_data_to_add.item_id
-	var quantity_to_add = item_data_to_add.quantity
 
 	# --- Try stacking in Hotbar ---
 	var target_index = find_first_stackable_slot(InventoryArea.HOTBAR, item_id)
@@ -96,6 +95,7 @@ func _try_add_quantity_to_slot(area: InventoryArea, index: int, item_data_to_add
 		return true # All quantity was added
 
 	return false # Couldn't add any more
+
 
 func decrease_item_quantity(area: InventoryArea, index: int, amount_to_decrease: int = 1) -> bool:
 	if amount_to_decrease <= 0: return false # Cannot decrease by zero or less

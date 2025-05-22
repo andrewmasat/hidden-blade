@@ -157,7 +157,7 @@ func _handle_double_click() -> void:
 # --- Drag and Drop Methods ---
 
 # Called by the engine when a drag is initiated FROM this control.
-func _get_drag_data(at_position: Vector2):
+func _get_drag_data(_at_position: Vector2):
 	# Prevent starting a drag if an item is already held on the cursor.
 	if Inventory.get_cursor_item() != null:
 		print("Slot [", slot_index, "] _get_drag_data: Cannot start drag, item on cursor.") # Debug
@@ -188,7 +188,7 @@ func _get_drag_data(at_position: Vector2):
 
 
 # Called by the engine to check if data from a drag operation can be dropped ONTO this control.
-func _can_drop_data(at_position: Vector2, data) -> bool:
+func _can_drop_data(_at_position: Vector2, data) -> bool:
 	# Accept the drop only if an item is currently held on the cursor
 	# AND the drag data payload indicates it's the correct type of drag operation.
 	var can_drop = Inventory.get_cursor_item() != null and \
@@ -199,7 +199,7 @@ func _can_drop_data(at_position: Vector2, data) -> bool:
 
 
 # Called by the engine when a drag operation successfully drops data ONTO this control.
-func _drop_data(at_position: Vector2, data) -> void:
+func _drop_data(_at_position: Vector2, _data) -> void:
 	# The item to be placed is already on the cursor (moved there by _get_drag_data).
 	# Call the Inventory function to handle placing/swapping/merging at this slot's location.
 	print("Slot [", slot_index, "] _drop_data: Calling place_cursor_item_on_slot.") # Debug

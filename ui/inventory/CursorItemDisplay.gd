@@ -13,7 +13,7 @@ func _ready():
 	_on_cursor_item_changed(Inventory.get_cursor_item())
 
 
-func _process(delta):
+func _process(_delta):
 	# Follow the mouse cursor
 	if visible:
 		global_position = get_global_mouse_position()

@@ -138,7 +138,7 @@ func _perform_scene_change(target_scene_path: String, target_spawn_name: String)
 		main_scene_root = new_scene_instance # Store ref to Main
 		current_scene_root = main_scene_root
 		# Find gameplay nodes immediately after adding Main
-		await _setup_main_scene(target_spawn_name) # Setup finds player, container, initial level, fade
+		_setup_main_scene(target_spawn_name) # Setup finds player, container, initial level, fade
 	elif is_loading_ui_scene:
 		parent_node_for_new_scene = get_tree().get_root()
 		current_scene_root = new_scene_instance # UI scene is now the current root
@@ -224,28 +224,26 @@ func _add_new_scene_to_tree(scene_instance: Node, is_main: bool) -> void:
 
 
 # Finds persistent nodes after Main scene loads, finds initial level/spawn, positions player.
-func _setup_main_scene(initial_spawn_name: String) -> void:
+func _setup_main_scene(_initial_spawn_name: String) -> void:
 	print("  -> SceneManager: _setup_main_scene called for Main scene.")
 	if not is_instance_valid(main_scene_root):
 		printerr("    Error: main_scene_root invalid during _setup_main_scene!")
 		return
 
 	scene_container_node = main_scene_root.find_child("Environments", true, false)
-	await initialize_fade_layer()
+	initialize_fade_layer()
 
-	if not is_instance_valid(scene_container_node):
-		printerr("    Error: scene_container_node invalid during _setup_main_scene!")
-		return
-
-	current_level_root = scene_container_node.get_child(0) if scene_container_node.get_child_count() > 0 else null
-	if is_instance_valid(current_level_root):
-		print("    -> Initial level set in SceneManager:", current_level_root.name)
-	else:
-		printerr("    Error: No initial level found under Environments node for Main setup!")
-	# ------------------------------------
-
-	# Player spawning and positioning is handled by Main.gd now for new game
-	print("  -> SceneManager: _setup_main_scene finished. Main.gd will handle player spawn & initial pos.")
+	if is_instance_valid(scene_container_node):
+		var initial_level_node: Node = null
+		for child in scene_container_node.get_children():
+			if child is Node2D and not child is MultiplayerSpawner: # Example find logic
+				initial_level_node = child
+				break
+		current_level_root = initial_level_node # Set based on find
+		if is_instance_valid(current_level_root):
+			print("    -> SceneManager: Initial level set to:", current_level_root.name)
+		else:
+			printerr("    Error: SceneManager could not find initial level in _setup_main_scene!")
 
 
 # Finds spawn point in the newly loaded level, positions player, handles grace period.
@@ -265,7 +263,6 @@ func _setup_level_transition(target_spawn_name: String) -> void: # Mark as async
 	print("    -> Player positioned at: ", target_pos)
 
 	# --- Grace Period ---
-	var original_player_layer_value = player_node.get_collision_layer() # Store full layer value
 	var needs_disable = player_node.get_collision_layer_value(TRIGGER_LAYER_BIT_VALUE)
 	if needs_disable:
 		print("    -> Disabling player trigger collision layer bit: ", TRIGGER_LAYER_BIT_VALUE)

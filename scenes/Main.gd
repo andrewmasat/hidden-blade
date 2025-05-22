@@ -2,8 +2,10 @@
 extends Node
 
 const PlayerScene = preload("res://player/Player.tscn")
+const DroppedItemScene = preload("res://world/DroppedItem.tscn")
 
 @onready var player_spawner: MultiplayerSpawner = $WorldYSort/PlayerSpawner
+@onready var dropped_item_spawner: MultiplayerSpawner = $WorldYSort/Environments/DroppedItemSpawner
 @onready var environments_container: Node2D = $WorldYSort/Environments
 @onready var hud = $HUD
 @onready var pause_menu = $PauseMenu
@@ -14,6 +16,13 @@ const PlayerScene = preload("res://player/Player.tscn")
 
 var local_player_node: CharacterBody2D = null
 var previous_mouse_mode_before_pause = Input.MOUSE_MODE_CAPTURED
+var _next_dropped_item_game_id: int = 1
+
+func generate_unique_dropped_item_id() -> String:
+	# ... (implementation) ...
+	var id_str = "item_" + str(_next_dropped_item_game_id)
+	_next_dropped_item_game_id += 1
+	return id_str
 
 func _ready() -> void:
 	print("Main.gd _ready: My Peer ID:", multiplayer.get_unique_id(), "Is Server:", multiplayer.is_server())
@@ -33,15 +42,36 @@ func _ready() -> void:
 	else:
 		printerr("Main Error: PlayerSpawner node not found, cannot set spawn_function!")
 
+	if is_instance_valid(dropped_item_spawner):
+		# The custom function can be the same if data differentiates, or a new one.
+		# Let's assume you have a dedicated one or will adapt _custom_dropped_item_spawn_function
+		dropped_item_spawner.spawn_function = Callable(self, "_custom_dropped_item_spawn_function") # Ensure this function exists and handles dropped items
+		print("Main: Set custom spawn function on DroppedItemSpawner.")
+	else:
+		printerr("Main Error: DroppedItemSpawner node not found! Cannot set spawn_function!")
+		# This might not be critical to STOP if game can run without dropped items initially
+
 	# --- Initialize SceneManager ---
 	if SceneManager:
 		SceneManager.scene_container_node = environments_container
-		SceneManager.main_scene_root = self # 'self' is the Main scene instance
-		# Player node ref is set later by _setup_local_player_references
-		# Initial level ref is set later by _setup_local_player_references for new game
-		# or by SceneManager for loaded game
-		await SceneManager.initialize_fade_layer() # Call this once main structural nodes are set in SM
-		print("Main: Initialized SceneManager structural references (container, main_root, fade).")
+		SceneManager.main_scene_root = self
+		# --- SET INITIAL LEVEL ROOT EARLIER ---
+		var initial_level_node: Node = null
+		if is_instance_valid(environments_container):
+			for child in environments_container.get_children():
+				if child is Node2D and not child is MultiplayerSpawner: # Be more specific if needed
+					initial_level_node = child
+					break # Found the first actual level node
+
+		if is_instance_valid(initial_level_node):
+			SceneManager.current_level_root = initial_level_node
+			print("Main: Set SceneManager.current_level_root to initial level:", SceneManager.current_level_root.name)
+		else:
+			printerr("Main Error: No suitable initial level node found under Environments!")
+			# Potentially stop game here or load a default empty level
+		# ------------------------------------
+		SceneManager.initialize_fade_layer()
+		print("Main: Initialized SceneManager structural references.")
 	else:
 		printerr("Main Error: SceneManager Autoload not found!")
 		return # Critical error
@@ -96,64 +126,102 @@ func _on_host_self_connected_for_spawn(peer_id: int): # If Main loaded before ho
 		spawn_player_for_peer(1)
 
 
-func _custom_player_spawn_function(peer_id_to_spawn_for: Variant) -> Node:
-	var peer_id = int(peer_id_to_spawn_for)
-
-	print("Main (Server - _custom_player_spawn_function): Spawning player for peer ID:", peer_id)
+func _custom_player_spawn_function(peer_id_to_spawn_for_variant: Variant) -> Node:
+	var peer_id = int(peer_id_to_spawn_for_variant)
+	print("CustomPlayerSpawn (Peer:", multiplayer.get_unique_id(), "): Spawning player for peer ID:", peer_id)
 
 	if not PlayerScene:
-		printerr("Main (_custom_player_spawn_function): PlayerScene not preloaded!")
+		printerr("CustomPlayerSpawn: PlayerScene not preloaded!")
 		return null
-
 	var player_instance = PlayerScene.instantiate()
 	if not is_instance_valid(player_instance):
-		printerr("Main (_custom_player_spawn_function): Failed to instantiate PlayerScene!")
+		printerr("CustomPlayerSpawn: Failed to instantiate PlayerScene!")
 		return null
 
 	player_instance.name = str(peer_id)
 	player_instance.set_multiplayer_authority(peer_id)
 
-	var spawn_marker_name = "InitialSpawn" # Default for new game start
-	var spawn_position = Vector2.ZERO # Fallback
+	# --- SERVER sets its OWN initial position directly ---
+	if peer_id == multiplayer.get_unique_id(): # If spawning for self (the server/host)
+		print("  -> CustomPlayerSpawn (Server Logic for SELF ID:", peer_id, "): Setting initial position directly.")
+		var spawn_marker_name = "InitialSpawn"
+		var spawn_pos = Vector2.ZERO
+		if is_instance_valid(SceneManager.current_level_root):
+			var marker = SceneManager.current_level_root.find_child(spawn_marker_name, true, false) as Node2D
+			if marker: spawn_pos = marker.global_position
+			else: spawn_pos = SceneManager.current_level_root.global_position
+		player_instance.global_position = spawn_pos
+		print("  -> CustomPlayerSpawn (Server for SELF): Position set to ", spawn_pos)
+	# For OTHER clients, position will be set via RPC AFTER they confirm ready.
+	# Their MultiplayerSynchronizer will still sync it on spawn if configured,
+	# but the RPC gives an explicit re-set.
 
-	if is_instance_valid(SceneManager.current_level_root):
-		var spawn_marker = SceneManager.current_level_root.find_child(spawn_marker_name, true, false) as Node2D
-		if is_instance_valid(spawn_marker):
-			spawn_position = spawn_marker.global_position
-			print("  -> CustomSpawn: Found '", spawn_marker_name, "' at ", spawn_position, " for player ", peer_id)
-		else:
-			printerr("  -> CustomSpawn: '", spawn_marker_name, "' not found in current level '", SceneManager.current_level_root.name, "'. Player ", peer_id, " at origin of level.")
-			spawn_position = SceneManager.current_level_root.global_position # Spawn at level origin
-	else:
-		printerr("  -> CustomSpawn: SceneManager.current_level_root is invalid. Player ", peer_id, " at global origin.")
-		# This is a critical error if current_level_root isn't set when spawning.
-
-	player_instance.global_position = spawn_position # Set authoritative position
-	# ---------------------------------
-
-	print("Main (_custom_player_spawn_function): Player instance '", player_instance.name, "' created, configured, and positioned at ", spawn_position)
 	return player_instance
+
+
+@rpc("any_peer", "call_local", "reliable") # Client calls this on Server (ID 1)
+func client_player_node_ready_for_init(client_peer_id_arg: int):
+	if not multiplayer.is_server(): return
+
+	print("Main (Server): Client [", client_peer_id_arg, "] reported its player node is ready. Setting initial pos via RPC.")
+
+	# Find the server's instance of the client's player
+	var spawner_spawn_path_node = get_node_or_null(player_spawner.spawn_path) # Get correct parent
+	if not is_instance_valid(spawner_spawn_path_node): return # Error
+
+	var client_player_on_server = spawner_spawn_path_node.get_node_or_null(str(client_peer_id_arg)) as Player
+	if is_instance_valid(client_player_on_server):
+		# Determine initial spawn position (same logic as in _custom_player_spawn_function for host)
+		var spawn_marker_name = "InitialSpawn"
+		var spawn_pos = Vector2.ZERO
+		if is_instance_valid(SceneManager.current_level_root):
+			var marker = SceneManager.current_level_root.find_child(spawn_marker_name, true, false) as Node2D
+			if marker: spawn_pos = marker.global_position
+			else: spawn_pos = SceneManager.current_level_root.global_position
+		# Call RPC on the client's player node to set its position
+		client_player_on_server.rpc("set_initial_network_position", spawn_pos)
+		print("  -> Main (Server): Sent set_initial_network_position RPC to Player [", client_peer_id_arg, "] with pos ", spawn_pos)
+	else:
+		printerr("Main (Server): Could not find client [", client_peer_id_arg, "]'s player node on server to send position RPC.")
 
 
 func _wait_and_setup_local_player_client():
 	if multiplayer.is_server(): return # Only for clients
 
 	var local_peer_id_str = str(multiplayer.get_unique_id())
-	var spawner_spawn_path_node = get_node_or_null(player_spawner.spawn_path)
-	if not is_instance_valid(spawner_spawn_path_node):
-		printerr("Main (Client): Spawner path invalid while waiting for player.")
+
+	if not is_instance_valid(player_spawner): # Ensure spawner ref is valid
+		printerr("Main (Client) _wait: PlayerSpawner ref is invalid!")
 		return
 
-	# Wait up to a few seconds for the node to appear
+	var spawner_spawn_path_node_path = player_spawner.spawn_path
+	var actual_spawn_parent_node: Node
+	if spawner_spawn_path_node_path.is_empty() or spawner_spawn_path_node_path == NodePath("."):
+		actual_spawn_parent_node = player_spawner
+	else:
+		actual_spawn_parent_node = player_spawner.get_node_or_null(spawner_spawn_path_node_path)
+
+	if not is_instance_valid(actual_spawn_parent_node):
+		printerr("Main (Client) _wait: Spawner's actual_spawn_parent_node ('", spawner_spawn_path_node_path, "' relative to '", player_spawner.name, "') is invalid.")
+		return
+
+	print("Main (Client) _wait: Waiting for player '", local_peer_id_str, "' under '", actual_spawn_parent_node.name, "' (Path: ", actual_spawn_parent_node.get_path(), ")") # DEBUG
+
 	var attempts = 0
-	while not is_instance_valid(spawner_spawn_path_node.get_node_or_null(local_peer_id_str)) and attempts < 100: # Approx 1.6s
+	var found_node = actual_spawn_parent_node.get_node_or_null(local_peer_id_str)
+	while not is_instance_valid(found_node) and attempts < 120: # ~2 seconds
 		await get_tree().process_frame
+		found_node = actual_spawn_parent_node.get_node_or_null(local_peer_id_str)
 		attempts += 1
 
-	if is_instance_valid(spawner_spawn_path_node.get_node_or_null(local_peer_id_str)):
+	if is_instance_valid(found_node):
+		var local_player_instance = found_node as Player
 		_setup_local_player_references(local_peer_id_str)
+
+		print("Main (Client): Local player node '", local_peer_id_str, "' found. Notifying server for initial position.")
+		rpc_id(1, "client_player_node_ready_for_init", multiplayer.get_unique_id())
 	else:
-		printerr("Main (Client): Timed out waiting for local player node '", local_peer_id_str, "' to be spawned.")
+		printerr("Main (Client): Timed out waiting for local player node '", local_peer_id_str, "' to be spawned under '", actual_spawn_parent_node.name, "'. Final Children of '", actual_spawn_parent_node.name, "': ", actual_spawn_parent_node.get_children())
 
 
 func spawn_player_for_peer(peer_id_to_spawn_for: int):
@@ -237,27 +305,10 @@ func _setup_local_player_references(player_node_name_is_peer_id_str: String) -> 
 
 	if is_instance_valid(local_player_node):
 		SceneManager.player_node = local_player_node
-		print("Main: Local player node '", local_player_node.name, "' reference SET.")
 
-		# --- ALWAYS NEW GAME POSITIONING LOGIC NOW ---
-		# (As server handles restoring position for returning players)
-		print("Main: New connection setup for player '", local_player_node.name, "'.")
-		var initial_level_node = SceneManager.current_level_root # Get from SM
-		if not is_instance_valid(initial_level_node):
-			initial_level_node = environments_container.get_child(0) if environments_container.get_child_count() > 0 else null
-			if is_instance_valid(initial_level_node): SceneManager.current_level_root = initial_level_node
-			else: printerr("Main Error: No initial level for new game spawn!"); return
+		print("Main: Local player node '", local_player_node.name, "' reference SET in SceneManager.")
 
-		var initial_spawn_marker_name = "InitialSpawn" # Get from SM if stored, e.g., SceneManager.target_spawn_name
-		var initial_spawn = initial_level_node.find_child(initial_spawn_marker_name, true, false) as Node2D
-
-		if is_instance_valid(initial_spawn):
-			local_player_node.global_position = initial_spawn.global_position
-			print("Main: Local player '", local_player_node.name, "' positioned at '", initial_spawn_marker_name, "'.")
-		else:
-			print("Main Warning: '", initial_spawn_marker_name, "' not found. Player at origin.")
-			local_player_node.global_position = Vector2.ZERO
-
+		print("Main: New game setup for player '", local_player_node.name, "'. Position is synced from server.")
 		if local_player_node.has_method("end_scene_transition"): # Reset to IDLE_RUN
 			local_player_node.call_deferred("end_scene_transition")
 	else:
@@ -276,6 +327,50 @@ func _on_player_left(peer_id: int):
 		if local_player_node == player_to_remove: # Should not happen if server disconnected properly
 			local_player_node = null
 			SceneManager.player_node = null
+
+# --- Dropped Item ---
+func _custom_dropped_item_spawn_function(data: Dictionary) -> Node:
+	var item_identifier = data.get("item_identifier", "")
+	var item_quantity = data.get("item_quantity", 1)
+	var drop_mode_enum = data.get("drop_mode_int", DroppedItem.DropMode.GLOBAL) as DroppedItem.DropMode
+	var owner_peer_id = data.get("owner_peer_id", 0)
+	var unique_id_for_instance = data.get("item_unique_id", "")
+	var position = Vector2(data.get("position_x", 0), data.get("position_y", 0))
+	print("CustomDroppedItemSpawn (Peer:", multiplayer.get_unique_id(), "): Spawning '", item_identifier, "' UniqueID:", unique_id_for_instance)
+
+	if not DroppedItemScene:
+		printerr("CustomDroppedItemSpawn: DroppedItemScene not preloaded!")
+		return null
+	var dropped_item = DroppedItemScene.instantiate() as DroppedItem
+	if not is_instance_valid(dropped_item):
+		printerr("CustomDroppedItemSpawn: Failed to instantiate DroppedItemScene!")
+		return null
+
+	if multiplayer.is_server():
+		print("  -> CustomDroppedItemSpawn (Server Logic for ID:", unique_id_for_instance, "): Setting initial data.")
+		var item_base_res: ItemData = null
+		if item_identifier.begins_with("res://"): item_base_res = load(item_identifier)
+		else:
+			if ItemDatabase: item_base_res = ItemDatabase.get_item_base(item_identifier)
+
+		if not item_base_res is ItemData:
+			printerr("  -> CustomDroppedItemSpawn (Server): Could not get ItemData for '", item_identifier, "'")
+			dropped_item.queue_free() # Clean up bad instance
+			return null
+
+		var item_data_instance = item_base_res.duplicate()
+		item_data_instance.quantity = item_quantity
+
+		# This function sets properties that will be synced
+		dropped_item.initialize_server_data(item_data_instance, drop_mode_enum, owner_peer_id, unique_id_for_instance, position)
+	# --------------------------------------------
+	# Clients will receive these properties (item_data, drop_mode, owner_peer_id, item_unique_id, global_position)
+	# via the DroppedItem's MultiplayerSynchronizer.
+	# DroppedItem._ready() calls _update_visuals_and_interaction() which uses these synced properties.
+
+	print("CustomDroppedItemSpawn (Peer:", multiplayer.get_unique_id(), "): DroppedItem instance created for '", unique_id_for_instance, "'")
+	return dropped_item
+
 
 # --- Pause/Resume Logic ---
 func pause_game() -> void:
