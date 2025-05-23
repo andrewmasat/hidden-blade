@@ -371,8 +371,10 @@ func server_handle_item_drop_request(item_identifier: String, item_quantity_to_d
 			return
 		var new_item_id_str = main_node_ref.generate_unique_dropped_item_id()
 
-		# Adjust drop position if initial target was occupied (for visual piling)
-		target_drop_position = find_non_overlapping_drop_position(target_drop_position)
+		var final_drop_position = find_non_overlapping_drop_position(
+			target_drop_position,
+			item_base_res.item_id
+		)
 
 		var spawn_custom_data = {
 			"item_identifier": item_identifier,
@@ -380,8 +382,8 @@ func server_handle_item_drop_request(item_identifier: String, item_quantity_to_d
 			"drop_mode_int": drop_mode_int,
 			"owner_peer_id": intended_owner_peer_id,
 			"item_unique_id": new_item_id_str,
-			"position_x": target_drop_position.x,
-			"position_y": target_drop_position.y
+			"position_x": final_drop_position.x,
+			"position_y": final_drop_position.y
 		}
 		dropped_item_spawner.spawn(spawn_custom_data)
 		print("  -> Server requested DroppedItemSpawner to spawn item with gameplay ID:", new_item_id_str)
@@ -589,50 +591,73 @@ func get_target_animation() -> String:
 	# Construct the animation name (e.g., "run_right", "idle_up")
 	return action_prefix + "_" + direction_suffix
 
-func find_non_overlapping_drop_position(target_pos: Vector2, 
-										 max_attempts: int = 3,        # Fewer attempts for closer piling
-										 check_radius: float = 5.0,    # Smaller check radius
-										 spread_distance: float = 6.0  # Smaller spread
+func find_non_overlapping_drop_position(target_pos: Vector2,
+										item_id_being_dropped: String, # New argument
+										max_attempts: int = 5,
+										# Define different parameters
+										check_radius_same_item: float = 5.0,
+										spread_distance_same_item: float = 6.0,
+										check_radius_diff_item: float = 10.0, # Larger radius for different items
+										spread_distance_diff_item: float = 12.0 # Spread further for different items
 										) -> Vector2:
-	if not get_world_2d(): # Safety check if called when not in tree
-		printerr("Player: find_non_overlapping_drop_position - World2D not available.")
-		return target_pos
-		
+	if not get_world_2d(): return target_pos
+
 	var space_state = get_world_2d().direct_space_state
 	var query = PhysicsShapeQueryParameters2D.new()
 	var check_shape = CircleShape2D.new()
-	check_shape.radius = check_radius
-	query.shape = check_shape
-	# Configure collision mask to ONLY check against other DroppedItems
-	# This requires DroppedItem to be on a specific layer, e.g., layer specified by a constant.
-	# query.collision_mask = YOUR_DROPPED_ITEM_LAYER_BIT # Example: 1 << (DROPPED_ITEM_PHYSICS_LAYER - 1)
+	# query.collision_mask = YOUR_DROPPED_ITEM_LAYER_BIT
 	query.collide_with_areas = true
 	query.collide_with_bodies = false
-	query.exclude = [self.get_rid()] # Exclude the player itself
+	# Exclude the player who is dropping if this is called on server
+	# query.exclude = [self.get_rid()] # 'self' here is the Player node (server instance)
 
 	var current_pos = target_pos
 	for i in range(max_attempts):
+		var current_check_radius = check_radius_same_item # Assume checking against same item type initially
+
 		query.transform = Transform2D(0, current_pos)
+		# Temporarily set shape radius for this check iteration
+		# Note: This isn't ideal as shape is shared. Better to have two query objects or adjust radius per check.
+		# For now, let's just use a general radius and adjust spread based on type.
+		check_shape.radius = check_radius_diff_item # Use larger radius for general detection
+		query.shape = check_shape
 		var results = space_state.intersect_shape(query)
 
-		var collision_with_other_item_found = false
+		var collision_with_diff_item_found = false
+		var collision_with_any_item_found = false
+
 		for result in results:
-			# Check if the collider is a DroppedItem and NOT the one we might be trying to merge with
-			# For simple overlap prevention, just checking 'is DroppedItem' is enough
 			if result.collider is DroppedItem:
-				collision_with_other_item_found = true
-				break
-		
-		if not collision_with_other_item_found:
-			return current_pos # Found a clear enough spot
+				collision_with_any_item_found = true
+				var existing_item = result.collider as DroppedItem
+				var existing_item_data = existing_item.get_item_data()
+				if is_instance_valid(existing_item_data) and existing_item_data.item_id != item_id_being_dropped:
+					collision_with_diff_item_found = true
+					break # Prioritize spreading from different items
+
+		if not collision_with_any_item_found:
+			return current_pos # Found a clear spot
+
+		# Determine spread distance
+		var current_spread_distance = spread_distance_same_item
+		if collision_with_diff_item_found:
+			current_spread_distance = spread_distance_diff_item
+			print("Drop collision with DIFFERENT item, using larger spread.")
+		# else: print("Drop collision with SAME item or general, using smaller spread.")
+
 
 		# If collision found, try a slightly different position nearby
-		var angle = randf_range(-PI / 4.0, PI / 4.0) + (PI if i % 2 == 0 else 0) # Try to spread a bit
-		var dist_offset = spread_distance * (randf() * 0.5 + 0.5) # Slightly random distance
-		current_pos = target_pos + Vector2(cos(angle), sin(angle)) * dist_offset
-		print("Drop collision, trying new position:", current_pos)
+		var angle_offset = float(i) * (TAU / float(max_attempts)) # Spread in a circle
+		var angle = last_direction.angle() + PI + angle_offset # Try to drop behind player, then spread
+		# If last_direction is zero, pick a default
+		if last_direction == Vector2.ZERO and i == 0 : angle = randf_range(0, TAU)
 
-	print("Max drop attempts reached for overlap, placing at last attempt:", current_pos)
+
+		var dist_offset = current_spread_distance * (randf() * 0.3 + 0.7) # Slight randomness
+		current_pos = target_pos + Vector2(cos(angle), sin(angle)) * dist_offset
+		# print("Drop collision, trying new position:", current_pos)
+
+	# print("Max drop attempts reached for overlap, placing at last attempt:", current_pos)
 	return current_pos
 
 
