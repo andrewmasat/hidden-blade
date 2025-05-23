@@ -2,10 +2,13 @@
 extends Area2D
 class_name DroppedItem
 
+@onready var collision_shape: CollisionShape2D = $CollisionShape2D
 @onready var sprite: TextureRect = $ItemSprite
 @onready var quantity_label: Label = $QuantityLabel
 @onready var prompt_label: Label = $PromptLabel
-@onready var collision_shape: CollisionShape2D = $CollisionShape2D
+@onready var despawn_timer: Timer = $DespawnTimer
+
+@export var default_despawn_duration: float = 60.0
 
 enum DropMode { GLOBAL, PERSONAL }
 
@@ -64,24 +67,31 @@ var _visual_update_requested: bool = false
 
 # --- Setters for Synced Properties ---
 func set_item_identifier_synced(new_id_or_path: String):
-	if _item_identifier_synced == new_id_or_path: return
+	if _item_identifier_synced == new_id_or_path and _item_identifier_synced != "": return
 	_item_identifier_synced = new_id_or_path
-	_reconstruct_local_item_data() # This will set _local_item_data_instance
-	# After reconstruction, explicitly request a visual update if node is ready.
-	# The _request_visual_update will handle deferring if needed.
-	if is_node_ready():
-		_request_visual_update()
+	# Avoid multiplayer check here; this setter is for when data IS synced
+	# print("DroppedItem [", name, "] (Peer:", multiplayer.get_unique_id() if is_node_ready() and multiplayer else "PreReady", ") SETTER item_identifier_synced..." )
+	_reconstruct_local_item_data()
+	_request_visual_update()
 
 func set_quantity_synced(new_qty: int):
+	# if _quantity_synced == new_qty and _quantity_synced != 0: return # Keep this to avoid no-op syncs
+	# Allow setting to 0 if item is fully depleted (e.g. partial pickup later)
 	if _quantity_synced == new_qty: return
+
+	var old_qty = _quantity_synced
 	_quantity_synced = new_qty
-	# If _local_item_data_instance already exists due to identifier being set first, update its quantity.
+	print("DroppedItem [", name, "] (Peer:", multiplayer.get_unique_id() if multiplayer else "N/A", ") SETTER quantity_synced. Old:", old_qty, "New:", _quantity_synced)
+
+	# Update the quantity on the local ItemData instance if it exists
 	if is_instance_valid(_local_item_data_instance):
 		_local_item_data_instance.quantity = _quantity_synced
-	else: # Otherwise, full reconstruction is needed (identifier might not have been set yet)
-		_reconstruct_local_item_data()
-	if is_node_ready():
-		_request_visual_update()
+		print("  -> Updated _local_item_data_instance quantity to:", _local_item_data_instance.quantity)
+	else:
+		# If no instance, reconstruction will pick up the new quantity when identifier is set/synced
+		_reconstruct_local_item_data() # This might be needed if qty changes before ID fully syncs
+
+	_request_visual_update() # Always update visuals after quantity change
 
 func set_drop_mode(new_mode: DropMode):
 	if _drop_mode == new_mode: return
@@ -137,19 +147,14 @@ func _deferred_update_visuals_and_interaction():
 
 func initialize_server_data(p_item_data_ref: ItemData, p_drop_mode: DropMode, p_owner_peer_id: int, p_unique_id: String, start_position: Vector2):
 	# Server sets the properties that will trigger setters (and thus sync and reconstruction)
-	self.item_identifier_synced = p_item_data_ref.resource_path if not p_item_data_ref.resource_path.is_empty() else p_item_data_ref.item_id
-	self.quantity_synced = p_item_data_ref.quantity
-	self.drop_mode = p_drop_mode
-	self.owner_peer_id = p_owner_peer_id
-	self.item_unique_id = p_unique_id
-	self.global_position = start_position
+	_item_identifier_synced = p_item_data_ref.resource_path if not p_item_data_ref.resource_path.is_empty() else p_item_data_ref.item_id
+	_quantity_synced = p_item_data_ref.quantity
+	_drop_mode = p_drop_mode
+	_owner_peer_id = p_owner_peer_id
+	_item_unique_id = p_unique_id
+	global_position = start_position
 
-	# Since this is server init, ensure local data is also immediately consistent
-	# The setters for item_identifier_synced & quantity_synced will call _reconstruct_local_item_data
-	# _update_visuals_and_interaction will be called by _request_visual_update from setters.
-
-	print("DroppedItem [", name, "] SERVER initialized. UniqueID:", self.item_unique_id, "ItemID:", self.item_identifier_synced, "Qty:", self.quantity_synced)
-	play_bounce_animation()
+	_reconstruct_local_item_data()
 
 
 func _ready():
@@ -157,8 +162,39 @@ func _ready():
 	print("DroppedItem [", name, "] _ready. Peer:", peer_id_str, \
 		  " Initial _item_identifier_synced:", _item_identifier_synced, \
 		  " Initial _quantity_synced:", _quantity_synced)
-	call_deferred("_request_visual_update")
+	# Initial visual update based on properties set by initialize_server_data (on server)
+	# or by MultiplayerSynchronizer via setters (on clients).
+	_request_visual_update()
+	play_bounce_animation() # Play bounce animation for all peers
 
+	# Connect DespawnTimer timeout signal (only server needs to act on it)
+	if multiplayer.is_server() and is_instance_valid(despawn_timer):
+		# Start Despawn Timer (MOVED HERE - Server Only, after node is ready)
+		var actual_despawn_duration = default_despawn_duration
+		# ... (Optional: Get item-specific despawn time from _local_item_data_instance) ...
+		if is_instance_valid(_local_item_data_instance) and _local_item_data_instance.has_method("get"):
+			var item_specific_duration = _local_item_data_instance.get("world_despawn_duration")
+			if item_specific_duration is float and item_specific_duration > 0.0: # Check type also
+				actual_despawn_duration = item_specific_duration
+		
+		if actual_despawn_duration > 0.0:
+			despawn_timer.wait_time = actual_despawn_duration
+			despawn_timer.start()
+			print("DroppedItem [", _item_unique_id, "] Despawn timer started by SERVER for", actual_despawn_duration, "s.")
+		# else: print("DroppedItem [", _item_unique_id, "] No despawn needed or invalid duration.")
+
+		# Connect signal
+		if not despawn_timer.is_connected("timeout", Callable(self, "_on_DespawnTimer_timeout")):
+			var err = despawn_timer.connect("timeout", _on_DespawnTimer_timeout) # Callable not needed for same script
+			if err != OK: printerr("DroppedItem: Failed to connect despawn timer timeout. Error:", err)
+
+
+func _on_DespawnTimer_timeout() -> void:
+	if not multiplayer.is_server(): return # Should only execute on server
+
+	print("DroppedItem [", _item_unique_id, "] Despawn timer timed out. Removing item.")
+	# Server freeing the node will trigger MultiplayerSpawner to despawn it on clients
+	queue_free()
 
 func _update_visuals_and_interaction() -> void:
 	if not is_node_ready(): return
@@ -242,7 +278,6 @@ func play_bounce_animation() -> void:
 
 func enable_interaction() -> void:
 	if not is_instance_valid(self): return
-	print("DroppedItem [", item_unique_id, "] enable_interaction called. Monitoring set to true.") # Use unique_id for logging
 	monitoring = true
 
 
@@ -273,41 +308,48 @@ func _on_synced_property_changed(property_name: StringName):
 	_update_visuals_and_interaction()
 
 
-func show_prompt(player_node: Node2D = null) -> void: # player_node might be useful for context later
+func show_prompt(player_node: Player = null) -> void:
 	if not is_instance_valid(prompt_label): return
-	# Item should only show prompt if it's generally visible and interactive FOR THIS CLIENT
 	if not self.visible or not self.monitoring:
 		if is_instance_valid(prompt_label): prompt_label.visible = false
 		return
-
 	if is_instance_valid(player_node) and player_node.has_method("can_interact_with_prompts") and \
 	   not player_node.can_interact_with_prompts():
-		# print("DroppedItem [", item_unique_id, "] Show prompt called, but player cannot interact yet.") # Debug
-		if is_instance_valid(prompt_label): prompt_label.visible = false # Ensure it's hidden
+		if is_instance_valid(prompt_label): prompt_label.visible = false
 		return
 
-	var prompt_text = "Pick Up (F)" # Default
-	if is_instance_valid(_local_item_data_instance):
-		match _local_item_data_instance.item_type:
+	var current_item_data = get_item_data() # Uses the getter for _local_item_data_instance
+	if not is_instance_valid(current_item_data):
+		# No item data, maybe hide prompt or show generic error?
+		prompt_label.text = "[Error: No Item Data]"
+		prompt_label.modulate = Color.RED
+		prompt_label.visible = true
+		return
+
+	# --- Check if player's local inventory can accept this item ---
+	var can_pickup_inventory_wise = true
+	if Inventory and Inventory.has_method("can_player_add_item_check"):
+		# Pass a COPY of the item data, or at least its current quantity,
+		# because can_player_add_item_check might simulate with it.
+		# For this check, only the item_id, quantity, and max_stack_size are relevant from current_item_data
+		can_pickup_inventory_wise = Inventory.can_player_add_item_check(current_item_data)
+	# else: Inventory singleton not found or method missing, assume can pickup.
+
+	var prompt_text = ""
+	if not can_pickup_inventory_wise:
+		prompt_text = "[Inventory Full]"
+		prompt_label.modulate = Color.ORANGE_RED # Or some other warning color
+	else:
+		# Determine prompt text based on item type (if inventory not full)
+		prompt_label.modulate = Color.WHITE # Reset color
+		match current_item_data.item_type:
 			ItemData.ItemType.WEAPON: prompt_text = "Equip (F)"
 			ItemData.ItemType.CONSUMABLE: prompt_text = "Take (F)"
 			ItemData.ItemType.RESOURCE: prompt_text = "Gather (F)"
-			_: prompt_text = "Pick Up (F)"
+			_: prompt_text = "Pick Up (F)" # Default
 
-	# Optional: Check if inventory is full
-	var can_pickup_inventory_wise = true # Assume yes
-	# if Inventory and Inventory.is_full_for_item(_local_item_data_instance):
-	#     can_pickup_inventory_wise = false
-	#     prompt_text = "[Inventory Full]"
-
-	if can_pickup_inventory_wise:
-		prompt_label.modulate = Color.WHITE
-		prompt_label.text = prompt_text
-		prompt_label.visible = true
-	else:
-		prompt_label.modulate = Color.RED
-		prompt_label.text = prompt_text # Already "[Inventory Full]"
-		prompt_label.visible = true
+	prompt_label.text = prompt_text
+	prompt_label.visible = true
 
 
 # Hides the prompt label.

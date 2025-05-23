@@ -97,6 +97,51 @@ func _try_add_quantity_to_slot(area: InventoryArea, index: int, item_data_to_add
 	return false # Couldn't add any more
 
 
+func can_player_add_item_check(item_data_to_check: ItemData) -> bool:
+	if not item_data_to_check is ItemData or item_data_to_check.quantity <= 0:
+		printerr("Inventory: can_player_add_item_check - Invalid item_data provided.")
+		return false # Cannot add invalid item
+
+	var item_id = item_data_to_check.item_id
+	var quantity_remaining_to_add = item_data_to_check.quantity
+
+	# --- Try stacking in Hotbar ---
+	for item_slot_data in hotbar_slots:
+		if item_slot_data is ItemData and \
+		   item_slot_data.item_id == item_id and \
+		   not item_slot_data.is_stack_full():
+			var can_stack_amount = item_slot_data.max_stack_size - item_slot_data.quantity
+			quantity_remaining_to_add -= min(quantity_remaining_to_add, can_stack_amount)
+			if quantity_remaining_to_add <= 0: return true # Can fit it all
+
+	# --- Try stacking in Main Inventory ---
+	for item_slot_data in inventory_slots:
+		if item_slot_data is ItemData and \
+		   item_slot_data.item_id == item_id and \
+		   not item_slot_data.is_stack_full():
+			var can_stack_amount = item_slot_data.max_stack_size - item_slot_data.quantity
+			quantity_remaining_to_add -= min(quantity_remaining_to_add, can_stack_amount)
+			if quantity_remaining_to_add <= 0: return true # Can fit it all
+
+	# If quantity still remains, try finding empty slots
+	# --- Try empty slot in Hotbar ---
+	if quantity_remaining_to_add > 0: # Only if we still need to place items
+		for item_slot_data in hotbar_slots:
+			if item_slot_data == null:
+				quantity_remaining_to_add -= item_data_to_check.max_stack_size # Assume full stack can go here
+				if quantity_remaining_to_add <= 0: return true # Can fit it all
+
+	# --- Try empty slot in Main Inventory ---
+	if quantity_remaining_to_add > 0:
+		for item_slot_data in inventory_slots:
+			if item_slot_data == null:
+				quantity_remaining_to_add -= item_data_to_check.max_stack_size
+				if quantity_remaining_to_add <= 0: return true # Can fit it all
+
+	# If after all checks, quantity_remaining_to_add is still > 0, then it won't fit
+	return quantity_remaining_to_add <= 0
+
+
 func decrease_item_quantity(area: InventoryArea, index: int, amount_to_decrease: int = 1) -> bool:
 	if amount_to_decrease <= 0: return false # Cannot decrease by zero or less
 

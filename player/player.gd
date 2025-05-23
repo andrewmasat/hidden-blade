@@ -300,10 +300,12 @@ func handle_inventory_input():
 
 
 @rpc("any_peer", "call_local", "reliable") # Any peer can call, server executes it locallyerver
-func server_handle_item_drop_request(item_identifier: String, item_quantity: int, drop_mode_int: int, intended_owner_peer_id: int):
-	if multiplayer.get_unique_id() != 1 and not multiplayer.is_server(): return # Should only run on server
+func server_handle_item_drop_request(item_identifier: String, item_quantity_to_drop: int, drop_mode_int: int, intended_owner_peer_id: int):
+	if not multiplayer.is_server(): return
 
-	print("Player (Server Peer ID:", multiplayer.get_unique_id(), "): Received drop request for item identifier:'", item_identifier, "' qty:", item_quantity, "from sender:", multiplayer.get_remote_sender_id())
+	var requesting_peer_id = multiplayer.get_remote_sender_id()
+	if requesting_peer_id == 0 and multiplayer.get_unique_id() == 1: requesting_peer_id = 1
+	print("Player (Server Peer ID:", multiplayer.get_unique_id(), "): Received drop request for item '", item_identifier, "' qty:", item_quantity_to_drop, "from sender:", requesting_peer_id)
 
 	var item_base_res: ItemData = null
 	if item_identifier.begins_with("res://"): # It's likely a resource path
@@ -319,46 +321,70 @@ func server_handle_item_drop_request(item_identifier: String, item_quantity: int
 		printerr("  -> Server Error: Could not load/find ItemData for identifier '", item_identifier, "'")
 		return
 
-	var item_instance_for_drop = item_base_res.duplicate()
-	item_instance_for_drop.quantity = item_quantity
-
-	# Get DroppedItemSpawner (still need to get it relative to Main)
-	# and Main node for ID generation
-	if not is_instance_valid(SceneManager) or not is_instance_valid(SceneManager.main_scene_root):
-		printerr("  -> Server Error: SceneManager or SceneManager.main_scene_root is invalid!")
-		return
-
-	var main_node_ref = SceneManager.main_scene_root # Use the reference from SceneManager
-
-	var dropped_item_spawner = main_node_ref.find_child("DroppedItemSpawner", true, false) # Find spawner as child of Main
-	if not is_instance_valid(dropped_item_spawner):
-		printerr("  -> Server Error: DroppedItemSpawner not found as child of Main node!")
-		return
-
-	# Determine drop position (relative to THIS player instance on the server)
+	# --- Determine Drop Position (relative to THIS player instance on server) ---
 	var drop_offset = last_direction.normalized() * 25.0
 	if drop_offset == Vector2.ZERO: drop_offset = Vector2(25, 0)
-	var drop_position = global_position + drop_offset # Use 'self.global_position'
+	var target_drop_position = global_position + drop_offset # Initial target position
 
-	# --- Generate Unique ID using the correct Main node reference ---
-	if not main_node_ref.has_method("generate_unique_dropped_item_id"):
-		printerr("  -> Server Error: Main node (via SceneManager) missing 'generate_unique_dropped_item_id' method!")
-		return
-	var new_item_id_str = main_node_ref.generate_unique_dropped_item_id()
-	# --------------------------------------------------------------
+	# --- ATTEMPT TO MERGE WITH EXISTING DROPPED STACK ---
+	var check_merge_radius: float = 16.0 # How close to check for merging
+	var existing_item_to_merge_with: DroppedItem = find_nearby_stackable_dropped_item(
+		item_base_res.item_id,
+		target_drop_position,
+		check_merge_radius
+	)
 
-	var spawn_custom_data = {
-		"item_identifier": item_identifier,
-		"item_quantity": item_quantity,
-		"drop_mode_int": drop_mode_int,
-		"owner_peer_id": intended_owner_peer_id,
-		"item_unique_id": new_item_id_str,
-		"position_x": drop_position.x,
-		"position_y": drop_position.y
-	}
+	if is_instance_valid(existing_item_to_merge_with) and \
+	   is_instance_valid(existing_item_to_merge_with.get_item_data()) and \
+	   not existing_item_to_merge_with.get_item_data().is_stack_full():
+		
+		var existing_item_data = existing_item_to_merge_with.get_item_data()
+		var can_add_to_existing = existing_item_data.max_stack_size - existing_item_data.quantity
+		var amount_to_transfer = min(item_quantity_to_drop, can_add_to_existing)
 
-	dropped_item_spawner.spawn(spawn_custom_data)
-	print("  -> Server requested DroppedItemSpawner to spawn item with gameplay ID:", new_item_id_str)
+		if amount_to_transfer > 0:
+			print("  -> Server: Merging ", amount_to_transfer, " of '", item_base_res.item_id, "' onto existing dropped stack ID '", existing_item_to_merge_with.item_unique_id, "'")
+			# Directly update the quantity on the server's instance.
+			# The setter for quantity_synced on DroppedItem will trigger sync.
+			existing_item_to_merge_with.quantity_synced += amount_to_transfer
+			item_quantity_to_drop -= amount_to_transfer # Decrease remaining to drop
+			# No need to call _reconstruct_item_data if only quantity changes on existing _local_item_data_instance
+			# The setter for quantity_synced should handle updating the _local_item_data_instance.quantity
+			# and then call _request_visual_update.
+
+		if item_quantity_to_drop <= 0: # All items merged
+			print("  -> Server: All items merged. No new item spawned.")
+			return # Successfully merged, no need to spawn new
+	# --- END MERGE ATTEMPT ---
+
+	# If item_quantity_to_drop > 0, spawn a new item (or the remainder)
+	if item_quantity_to_drop > 0:
+		print("  -> Server: Spawning new DroppedItem (or remainder) for '", item_identifier, "' qty:", item_quantity_to_drop)
+		# Get DroppedItemSpawner, Main node for ID generation etc.
+		var main_node_ref = SceneManager.main_scene_root
+		if not is_instance_valid(main_node_ref):
+			printerr("  -> Server Error: main_node_ref not found as child of Main node!")
+			return
+		var dropped_item_spawner = main_node_ref.find_child("DroppedItemSpawner", true, false)
+		if not is_instance_valid(dropped_item_spawner):
+			printerr("  -> Server Error: DroppedItemSpawner not found as child of Main node!")
+			return
+		var new_item_id_str = main_node_ref.generate_unique_dropped_item_id()
+
+		# Adjust drop position if initial target was occupied (for visual piling)
+		target_drop_position = find_non_overlapping_drop_position(target_drop_position)
+
+		var spawn_custom_data = {
+			"item_identifier": item_identifier,
+			"item_quantity": item_quantity_to_drop, # Use remaining quantity
+			"drop_mode_int": drop_mode_int,
+			"owner_peer_id": intended_owner_peer_id,
+			"item_unique_id": new_item_id_str,
+			"position_x": target_drop_position.x,
+			"position_y": target_drop_position.y
+		}
+		dropped_item_spawner.spawn(spawn_custom_data)
+		print("  -> Server requested DroppedItemSpawner to spawn item with gameplay ID:", new_item_id_str)
 
 
 @rpc("any_peer", "call_local", "reliable")
@@ -563,42 +589,88 @@ func get_target_animation() -> String:
 	# Construct the animation name (e.g., "run_right", "idle_up")
 	return action_prefix + "_" + direction_suffix
 
-func find_non_overlapping_drop_position(target_pos: Vector2, max_attempts: int = 5, check_radius: float = 8.0, spread_distance: float = 10.0) -> Vector2:
+func find_non_overlapping_drop_position(target_pos: Vector2, 
+										 max_attempts: int = 3,        # Fewer attempts for closer piling
+										 check_radius: float = 5.0,    # Smaller check radius
+										 spread_distance: float = 6.0  # Smaller spread
+										) -> Vector2:
+	if not get_world_2d(): # Safety check if called when not in tree
+		printerr("Player: find_non_overlapping_drop_position - World2D not available.")
+		return target_pos
+		
 	var space_state = get_world_2d().direct_space_state
 	var query = PhysicsShapeQueryParameters2D.new()
-	# Use a small circle shape for checking overlap
 	var check_shape = CircleShape2D.new()
 	check_shape.radius = check_radius
 	query.shape = check_shape
-	# Configure collision mask to ONLY check against other DroppedItems (e.g., set their layer/mask)
-	#query.collision_mask = "Items"
-	query.collide_with_areas = true # Check Area2D
+	# Configure collision mask to ONLY check against other DroppedItems
+	# This requires DroppedItem to be on a specific layer, e.g., layer specified by a constant.
+	# query.collision_mask = YOUR_DROPPED_ITEM_LAYER_BIT # Example: 1 << (DROPPED_ITEM_PHYSICS_LAYER - 1)
+	query.collide_with_areas = true
 	query.collide_with_bodies = false
+	query.exclude = [self.get_rid()] # Exclude the player itself
 
 	var current_pos = target_pos
 	for i in range(max_attempts):
-		query.transform = Transform2D(0, current_pos) # Check at current position
+		query.transform = Transform2D(0, current_pos)
 		var results = space_state.intersect_shape(query)
 
-		var collision_found = false
+		var collision_with_other_item_found = false
 		for result in results:
-			if result.collider is DroppedItem: # Check if collision is with another dropped item
-				collision_found = true
+			# Check if the collider is a DroppedItem and NOT the one we might be trying to merge with
+			# For simple overlap prevention, just checking 'is DroppedItem' is enough
+			if result.collider is DroppedItem:
+				collision_with_other_item_found = true
 				break
-
-		if not collision_found:
-			return current_pos # Found a clear spot
+		
+		if not collision_with_other_item_found:
+			return current_pos # Found a clear enough spot
 
 		# If collision found, try a slightly different position nearby
-		# Example: spiral outwards or pick random offset
-		var angle = randf() * TAU # Random angle
-		var dist = spread_distance * (float(i + 1) / max_attempts) # Spread further each attempt
-		current_pos = target_pos + Vector2(cos(angle), sin(angle)) * dist
-		print("Drop collision detected, trying new position:", current_pos) # Debug
+		var angle = randf_range(-PI / 4.0, PI / 4.0) + (PI if i % 2 == 0 else 0) # Try to spread a bit
+		var dist_offset = spread_distance * (randf() * 0.5 + 0.5) # Slightly random distance
+		current_pos = target_pos + Vector2(cos(angle), sin(angle)) * dist_offset
+		print("Drop collision, trying new position:", current_pos)
 
-	# If still colliding after max attempts, return the last attempted position
-	print("Max drop attempts reached, placing at:", current_pos)
+	print("Max drop attempts reached for overlap, placing at last attempt:", current_pos)
 	return current_pos
+
+
+func find_nearby_stackable_dropped_item(item_id_to_match: String, at_position: Vector2, radius: float) -> DroppedItem:
+	if not multiplayer.is_server(): return null # Server only
+
+	# Get the node where dropped items live
+	var main_node_ref = SceneManager.main_scene_root
+	if not is_instance_valid(main_node_ref): return null
+	var dropped_item_spawner = main_node_ref.find_child("DroppedItemSpawner", true, false)
+	if not is_instance_valid(dropped_item_spawner): return null
+	var items_parent_node = dropped_item_spawner.get_node_or_null(dropped_item_spawner.spawn_path) if not dropped_item_spawner.spawn_path.is_empty() else dropped_item_spawner
+	if not is_instance_valid(items_parent_node): return null
+
+	var closest_stackable_item: DroppedItem = null
+	var min_dist_sq = radius * radius # Check within this squared radius
+
+	for child in items_parent_node.get_children():
+		if child is DroppedItem:
+			var dropped_item = child as DroppedItem
+			var item_data = dropped_item.get_item_data() # Accesses _local_item_data_instance
+
+			# Check if same item type, global (or same owner for personal), and not full
+			if is_instance_valid(item_data) and \
+			   item_data.item_id == item_id_to_match and \
+			   not item_data.is_stack_full() and \
+			   dropped_item.drop_mode == DroppedItem.DropMode.GLOBAL: # Simplification: only merge global items for now
+				
+				var dist_sq = dropped_item.global_position.distance_squared_to(at_position)
+				if dist_sq < min_dist_sq:
+					# Found a potential candidate, is it closer?
+					# No need to find the *absolute* closest, just the first suitable one is often fine.
+					closest_stackable_item = dropped_item
+					min_dist_sq = dist_sq # Update to find even closer ones if any
+					# For immediate merging with first found:
+					# return dropped_item
+
+	return closest_stackable_item # Returns closest or null
 
 
 # Called by SceneManager BEFORE starting the fade/load
@@ -828,25 +900,47 @@ func try_drop_selected_item():
 
 
 func try_pickup_nearby_item() -> void:
-	if not is_multiplayer_authority(): return
+	if not is_multiplayer_authority(): return # Only local player can initiate pickup
 	
-	# Instead of just nearby_items[0], use the _currently_prompted_item
+	# Use the _currently_prompted_item as the target.
+	# _update_nearby_item_prompts should have already selected the best one.
 	if is_instance_valid(_currently_prompted_item):
 		var item_to_pickup = _currently_prompted_item
-		print("Player [", name, "] trying to pick up prompted item ID:", item_to_pickup.item_unique_id)
+		var item_data_of_target = item_to_pickup.get_item_data() # Get its ItemData
+
+		if not is_instance_valid(item_data_of_target):
+			printerr("Player [", name, "]: Prompted item '", item_to_pickup.item_unique_id, "' has no valid ItemData.")
+			return
+
+		# --- NEW CHECK: Can the player's LOCAL inventory accept this item? ---
+		var can_add_locally = true # Assume yes by default
+		if Inventory and Inventory.has_method("can_player_add_item_check"):
+			can_add_locally = Inventory.can_player_add_item_check(item_data_of_target)
+		else:
+			printerr("Player [", name, "]: Inventory or can_player_add_item_check method not found for pre-pickup check.")
+
+		if not can_add_locally:
+			print("Player [", name, "]: Cannot pick up '", item_data_of_target.item_id, "'. Local inventory check says full.")
+			# TODO: Play "inventory full" sound or show a brief UI message here
+			return # Do not send RPC if local check fails
+		# -------------------------------------------------------------------
+
+		print("Player [", name, "] trying to pick up prompted item ID:", item_to_pickup.item_unique_id, " (Name:", item_to_pickup.name, ")")
 		if item_to_pickup.item_unique_id.is_empty():
 			printerr("Player [", name, "]: Prompted item has no unique ID set!")
 			return
+
+		# Send RPC to server if local check passed
 		rpc_id(1, "server_request_pickup_item_by_id", item_to_pickup.item_unique_id)
 		
 		# Optimistically hide prompt and remove from nearby list.
-		# Server will be the source of truth if item is actually removed.
+		# Server will be the source of truth if item is actually removed from world.
 		item_to_pickup.hide_prompt()
 		if item_to_pickup in nearby_items:
 			nearby_items.erase(item_to_pickup)
 		_currently_prompted_item = null
 		# Force re-evaluation of prompts next frame
-		_update_nearby_item_prompts()
+		_update_nearby_item_prompts() # This will find a new target or show no prompts
 	else:
 		print("Player [", name, "]: No item currently prompted for pickup.")
 

@@ -4,7 +4,7 @@ class_name ItemData
 
 # NEW Enum for Item Categories
 enum ItemType {
-	MISC,         # Default/uncategorized
+	MISC,
 	CONSUMABLE,
 	WEAPON,
 	TOOL,
@@ -30,6 +30,8 @@ enum ItemType {
 @export var damage: float = 0.0
 @export_group("Placeable")
 @export var placeable_scene: PackedScene
+@export_group("Behavior")
+@export var world_despawn_duration: float = 60.0
 
 # --- Helper Functions ---
 func is_stack_full() -> bool:
