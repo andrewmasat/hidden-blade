@@ -48,6 +48,8 @@ var equipped_item_data: ItemData = null
 var nearby_items: Array[DroppedItem] = []
 var _synced_animation_name: String = ""
 var _is_currently_processing_world_drop: bool = false
+var _currently_prompted_item: DroppedItem = null
+var _just_dropped_item_timer: Timer = Timer.new()
 
 # Node References
 @onready var animated_sprite = $AnimatedSprite2D
@@ -79,6 +81,9 @@ func _ready():
 	emit_signal("dash_charges_changed", _current_dashes, max_dashes)
 
 	dash_recharge_timer.wait_time = dash_recharge_time
+	_just_dropped_item_timer.one_shot = true
+	_just_dropped_item_timer.wait_time = 0.5 # Can't interact with own drop for 0.5s
+	add_child(_just_dropped_item_timer)
 
 	# Connect signals
 	dash_timer.timeout.connect(_on_dash_timer_timeout)
@@ -116,6 +121,9 @@ func _physics_process(delta: float):
 
 		_update_hand_and_weapon_animation()
 		return
+
+	if is_multiplayer_authority():
+		_update_nearby_item_prompts()
 
 	# Check if inventory is open (needs access to HUD state or a global flag)
 	var is_inventory_open = false
@@ -517,6 +525,7 @@ func handle_world_drop(item_data_to_drop: ItemData, p_drop_mode: DroppedItem.Dro
 
 	rpc_id(1, "server_handle_item_drop_request", identifier, item_data_to_drop.quantity, p_drop_mode, final_owner_id)
 
+	_just_dropped_item_timer.start()
 	_is_currently_processing_world_drop = false
 	print("Player (Client) [", name, "]: World drop RPC sent, _is_currently_processing_world_drop reset.")
 
@@ -634,6 +643,67 @@ func _update_hand_and_weapon_animation():
 		# e.g., if weapon sprite visibility depends on current_state or animation name.
 		pass
 
+func _update_nearby_item_prompts() -> void:
+	if not is_multiplayer_authority(): return
+
+	var best_target: DroppedItem = null
+	var min_dist_sq = INF
+
+	# Clean up invalid items from the list first & filter non-interactable
+	for i in range(nearby_items.size() - 1, -1, -1):
+		var item_node = nearby_items[i] as DroppedItem # Assume items in list are DroppedItem
+		if not is_instance_valid(item_node):
+			nearby_items.remove_at(i)
+			continue
+
+		# General visibility/interactivity check (based on item's own synced state)
+		if not item_node.visible or not item_node.monitoring:
+			if _currently_prompted_item == item_node: # If it was prompted, hide it
+				item_node.hide_prompt()
+				_currently_prompted_item = null
+			continue # Skip non-interactive items for prompt selection
+
+		# Player state check: Can THIS player interact with prompts right now?
+		if not can_interact_with_prompts():
+			# If player is busy, ensure no prompts are shown from any item
+			if is_instance_valid(_currently_prompted_item):
+				_currently_prompted_item.hide_prompt()
+			_currently_prompted_item = null
+			best_target = null # Explicitly no target if player can't interact
+			break # Stop further processing if player can't interact at all
+
+		# Ownership check (is it global or mine?)
+		var can_pickup_ownership_wise = false
+		if item_node.drop_mode == DroppedItem.DropMode.GLOBAL:
+			can_pickup_ownership_wise = true
+		elif item_node.drop_mode == DroppedItem.DropMode.PERSONAL and item_node.owner_peer_id == multiplayer.get_unique_id():
+			can_pickup_ownership_wise = true
+
+		if not can_pickup_ownership_wise:
+			if _currently_prompted_item == item_node: # If it was prompted, hide it
+				item_node.hide_prompt()
+				_currently_prompted_item = null
+			continue # Skip items player doesn't own (if personal)
+
+		# If all checks pass, consider for distance
+		var dist_sq = global_position.distance_squared_to(item_node.global_position)
+		if dist_sq < min_dist_sq:
+			min_dist_sq = dist_sq
+			best_target = item_node
+
+	# Update prompts based on best_target
+	if is_instance_valid(best_target):
+		if _currently_prompted_item != best_target:
+			if is_instance_valid(_currently_prompted_item):
+				_currently_prompted_item.hide_prompt()
+			best_target.show_prompt(self) # Pass player reference
+			_currently_prompted_item = best_target
+		# else: Best target is already prompted, do nothing
+	else: # No best target found (or player can't interact)
+		if is_instance_valid(_currently_prompted_item):
+			_currently_prompted_item.hide_prompt()
+			_currently_prompted_item = null
+
 # --- Equipping ---
 func _equip_item(item_data: ItemData):
 	# Clear previous equip state
@@ -728,6 +798,17 @@ func _consume_item(item_data: ItemData, hotbar_slot_index: int):
 	if not success:
 		printerr("Failed to decrease quantity after consuming item!")
 
+func can_interact_with_prompts() -> bool:
+	# Cannot interact if just dropped an item (timer running)
+	# OR if in a scene transition.
+	var just_dropped = not _just_dropped_item_timer.is_stopped()
+	var currently_transitioning = is_currently_transitioning() # Uses current_state == State.TRANSITIONING
+
+	# if just_dropped: print("Player cannot interact: just dropped.") # Debug
+	# if currently_transitioning: print("Player cannot interact: transitioning.") # Debug
+
+	return not just_dropped and not currently_transitioning
+
 func try_drop_selected_item():
 	var slot_index = Inventory.get_selected_slot_index()
 	var item_to_drop: ItemData = Inventory.get_selected_item() # Uses hotbar
@@ -747,57 +828,27 @@ func try_drop_selected_item():
 
 
 func try_pickup_nearby_item() -> void:
-	if not is_multiplayer_authority(): return # Only local player can initiate pickup
-	if nearby_items.is_empty():
-		# print("Player [", name, "]: No items nearby to pick up.") # Optional debug
-		return
-
-	var item_to_remove_from_list: DroppedItem = null
-
-	# --- Find the closest valid DroppedItem ---
-	var closest_item: DroppedItem = null
-	var min_distance_sq = INF # Using squared distance for efficiency
-
-	for item_node_idx in range(nearby_items.size() - 1, -1, -1): # Iterate backwards for safe removal
-		var item_node = nearby_items[item_node_idx]
-		if not is_instance_valid(item_node):
-			nearby_items.remove_at(item_node_idx) # Clean up invalid refs
-			continue
-
-		# Check if this item is pick-up-able by THIS player
-		# (e.g., global, or personal and owned by me)
-		var local_peer_id = multiplayer.get_unique_id()
-		var can_interact_with_this_item = false
-		if item_node.drop_mode == DroppedItem.DropMode.GLOBAL:
-			can_interact_with_this_item = true
-		elif item_node.drop_mode == DroppedItem.DropMode.PERSONAL and item_node.owner_peer_id == local_peer_id:
-			can_interact_with_this_item = true
-
-		if not can_interact_with_this_item:
-			continue # Skip items I can't interact with
-
-		var distance_sq = global_position.distance_squared_to(item_node.global_position)
-		if distance_sq < min_distance_sq:
-			min_distance_sq = distance_sq
-			closest_item = item_node
-
-		if is_instance_valid(closest_item): # If we found one
-			item_to_remove_from_list = closest_item # Mark for removal later
-			break # Found the one to try picking up
-	# -----------------------------------------
-
-	if is_instance_valid(closest_item):
-		print("Player [", name, "] trying to pick up closest item ID:", closest_item.item_unique_id, " (Name:", closest_item.name, ")")
-		# Send RPC to server with the item's UNIQUE ID
-		# Ensure item_unique_id is not empty
-		if closest_item.item_unique_id.is_empty():
-			printerr("Player [", name, "]: Closest item has no unique ID set!")
+	if not is_multiplayer_authority(): return
+	
+	# Instead of just nearby_items[0], use the _currently_prompted_item
+	if is_instance_valid(_currently_prompted_item):
+		var item_to_pickup = _currently_prompted_item
+		print("Player [", name, "] trying to pick up prompted item ID:", item_to_pickup.item_unique_id)
+		if item_to_pickup.item_unique_id.is_empty():
+			printerr("Player [", name, "]: Prompted item has no unique ID set!")
 			return
-		rpc_id(1, "server_request_pickup_item_by_id", closest_item.item_unique_id) # NEW RPC name
-		if item_to_remove_from_list in nearby_items: # Check again, might have been removed above
-			nearby_items.erase(item_to_remove_from_list)
+		rpc_id(1, "server_request_pickup_item_by_id", item_to_pickup.item_unique_id)
+		
+		# Optimistically hide prompt and remove from nearby list.
+		# Server will be the source of truth if item is actually removed.
+		item_to_pickup.hide_prompt()
+		if item_to_pickup in nearby_items:
+			nearby_items.erase(item_to_pickup)
+		_currently_prompted_item = null
+		# Force re-evaluation of prompts next frame
+		_update_nearby_item_prompts()
 	else:
-		print("Player [", name, "]: No pick-up-able items found nearby (after filtering).")
+		print("Player [", name, "]: No item currently prompted for pickup.")
 
 
 # --- Signal Callbacks ---
@@ -819,9 +870,9 @@ func _on_dash_recharge_timer_timeout():
 
 func _on_pickup_area_entered(area):
 	if area is DroppedItem:
-		if not area in nearby_items:
-			# print("Item entered pickup range:", area.item_unique_id) # Debug
-			nearby_items.append(area)
+		var item = area as DroppedItem
+		if is_instance_valid(item) and not item in nearby_items:
+			nearby_items.append(item)
 	elif area.is_in_group("player_pickup_area"):
 		pass
 
@@ -835,9 +886,14 @@ func _on_pickup_area_entered(area):
 
 func _on_pickup_area_exited(area):
 	if area is DroppedItem:
-		if area in nearby_items:
-			# print("Item exited pickup range:", area.item_unique_id) # Debug
-			nearby_items.erase(area)
+		var item = area as DroppedItem
+		if item in nearby_items:
+			nearby_items.erase(item)
+			# If this item was the one being prompted, player logic will hide it
+			if _currently_prompted_item == item:
+				if is_instance_valid(item): item.hide_prompt() # Hide its prompt
+				_currently_prompted_item = null
+			# _update_nearby_item_prompts will re-evaluate next frame
 
 	# --- Handle other types ---
 	# elif area.is_in_group("NPC") or area.is_in_group("Chest"):

@@ -16,7 +16,6 @@ var item_identifier_synced: String:
 		if _item_identifier_synced == new_id_or_path and _item_identifier_synced != "": return # Avoid re-processing if truly same and not initial default
 		var old_id = _item_identifier_synced
 		_item_identifier_synced = new_id_or_path
-		print("DroppedItem [", name, "] (Peer:", multiplayer.get_unique_id() if multiplayer else "N/A", ") SETTER item_identifier_synced. Old:", old_id, "New:", _item_identifier_synced) # DETAILED DEBUG
 		_reconstruct_local_item_data()
 		_request_visual_update() # Always request update after potential reconstruction
 
@@ -27,7 +26,6 @@ var quantity_synced: int:
 		if _quantity_synced == new_qty and _quantity_synced != 0 : return # Avoid re-processing if truly same and not initial default
 		var old_qty = _quantity_synced
 		_quantity_synced = new_qty
-		print("DroppedItem [", name, "] (Peer:", multiplayer.get_unique_id() if multiplayer else "N/A", ") SETTER quantity_synced. Old:", old_qty, "New:", _quantity_synced) # DETAILED DEBUG
 		if is_instance_valid(_local_item_data_instance):
 			_local_item_data_instance.quantity = _quantity_synced
 		else:
@@ -68,7 +66,6 @@ var _visual_update_requested: bool = false
 func set_item_identifier_synced(new_id_or_path: String):
 	if _item_identifier_synced == new_id_or_path: return
 	_item_identifier_synced = new_id_or_path
-	print("DroppedItem [", name, "] (Peer:", multiplayer.get_unique_id() if multiplayer else "N/A", ") Synced ID to:", _item_identifier_synced)
 	_reconstruct_local_item_data() # This will set _local_item_data_instance
 	# After reconstruction, explicitly request a visual update if node is ready.
 	# The _request_visual_update will handle deferring if needed.
@@ -78,7 +75,6 @@ func set_item_identifier_synced(new_id_or_path: String):
 func set_quantity_synced(new_qty: int):
 	if _quantity_synced == new_qty: return
 	_quantity_synced = new_qty
-	print("DroppedItem [", name, "] (Peer:", multiplayer.get_unique_id() if multiplayer else "N/A", ") Synced Qty to:", _quantity_synced)
 	# If _local_item_data_instance already exists due to identifier being set first, update its quantity.
 	if is_instance_valid(_local_item_data_instance):
 		_local_item_data_instance.quantity = _quantity_synced
@@ -245,23 +241,9 @@ func play_bounce_animation() -> void:
 
 
 func enable_interaction() -> void:
-	# Check if node still exists before enabling
 	if not is_instance_valid(self): return
-
+	print("DroppedItem [", item_unique_id, "] enable_interaction called. Monitoring set to true.") # Use unique_id for logging
 	monitoring = true
-	# Check if player is ALREADY overlapping when monitoring starts
-	check_initial_overlap()
-
-
-# Check if player is already inside when monitoring is enabled
-func check_initial_overlap() -> void:
-	# Get overlapping areas *now* that monitoring is enabled
-	var overlapping_areas = get_overlapping_areas()
-	for area in overlapping_areas:
-		if area.is_in_group("player_pickup_area"):
-			# Player was already inside, show prompt immediately
-			show_prompt(area.get_parent() as Node2D)
-			break # No need to check further areas
 
 
 func get_item_data() -> ItemData:
@@ -269,25 +251,18 @@ func get_item_data() -> ItemData:
 
 
 func _on_area_entered(area: Area2D) -> void:
-	# This check is now redundant IF monitoring is correctly disabled, but good as a safeguard.
-	if not self.visible or not self.monitoring: return
-
+	if not self.visible or not self.monitoring: return # Still good to have this guard
 	if area.is_in_group("player_pickup_area"):
-		var player_node = area.get_parent()
-		# Only show prompt if this client's player entered
-		if is_instance_valid(player_node) and player_node.is_multiplayer_authority():
-			print("DroppedItem [", name, "] showing prompt for local player.")
-			show_prompt(player_node)
+		# print("DroppedItem [", item_unique_id, "] detected player pickup area entry. Player will handle prompt.") # Debug
+		pass # Player's _on_pickup_area_entered in Player.gd will add this to its nearby_items list.
 
 
 func _on_area_exited(area: Area2D) -> void:
-	# Redundant check, good safeguard.
 	if not self.visible or not self.monitoring: return
-
 	if area.is_in_group("player_pickup_area"):
-		var player_node = area.get_parent()
-		if is_instance_valid(player_node) and player_node.is_multiplayer_authority():
-			hide_prompt()
+		# print("DroppedItem [", item_unique_id, "] detected player pickup area exit. Player will handle prompt.") # Debug
+		# If this item was being prompted by the Player, the Player script will hide it.
+		pass
 
 
 func _on_synced_property_changed(property_name: StringName):
@@ -297,48 +272,41 @@ func _on_synced_property_changed(property_name: StringName):
 	print("DroppedItem [", name, "] synced property changed (or ready). Updating state. Property:", property_name) # Debug
 	_update_visuals_and_interaction()
 
-# Shows and updates the prompt label based on item type.
-func show_prompt(_player_node: Node2D = null) -> void: # Optional player reference
+
+func show_prompt(player_node: Node2D = null) -> void: # player_node might be useful for context later
 	if not is_instance_valid(prompt_label): return
-	# Final check: only show if still visible and monitoring (interactive for me)
+	# Item should only show prompt if it's generally visible and interactive FOR THIS CLIENT
 	if not self.visible or not self.monitoring:
-		prompt_label.visible = false # Ensure it's hidden
+		if is_instance_valid(prompt_label): prompt_label.visible = false
 		return
 
-	# --- Determine Prompt Text ---
-	# Default prompt
-	var prompt_text = "Pick Up  [F]" # Assuming 'F' is your interact key
+	if is_instance_valid(player_node) and player_node.has_method("can_interact_with_prompts") and \
+	   not player_node.can_interact_with_prompts():
+		# print("DroppedItem [", item_unique_id, "] Show prompt called, but player cannot interact yet.") # Debug
+		if is_instance_valid(prompt_label): prompt_label.visible = false # Ensure it's hidden
+		return
 
-	# Customize based on item type (optional)
-	if _local_item_data_instance != null:
+	var prompt_text = "Pick Up (F)" # Default
+	if is_instance_valid(_local_item_data_instance):
 		match _local_item_data_instance.item_type:
-			ItemData.ItemType.WEAPON:
-				prompt_text = "Equip  [F]" # Example
-			ItemData.ItemType.CONSUMABLE:
-				prompt_text = "Take  [F]" # Example
-			ItemData.ItemType.RESOURCE:
-				prompt_text = "Gather  [F]" # Example
-			# Add other types if needed
-			_: # Default for MISC, TOOL, PLACEABLE etc.
-				prompt_text = "Pick Up  [F]"
+			ItemData.ItemType.WEAPON: prompt_text = "Equip (F)"
+			ItemData.ItemType.CONSUMABLE: prompt_text = "Take (F)"
+			ItemData.ItemType.RESOURCE: prompt_text = "Gather (F)"
+			_: prompt_text = "Pick Up (F)"
 
-	# --- Check if Player can Actually Pick Up (Optional but good) ---
-	# This prevents showing "Pick Up" if inventory is full.
-	# Requires communication back to Inventory singleton.
-	var can_pickup = true # Assume yes initially
-	# Example check (needs Inventory function):
-	# if Inventory.can_add_item_check(_local_item_data_instance):
-	#	 can_pickup = true
-	# else:
-	#	 can_pickup = false
-	#	 prompt_text = "[Inventory Full]" # Change text if cannot pick up
+	# Optional: Check if inventory is full
+	var can_pickup_inventory_wise = true # Assume yes
+	# if Inventory and Inventory.is_full_for_item(_local_item_data_instance):
+	#     can_pickup_inventory_wise = false
+	#     prompt_text = "[Inventory Full]"
 
-	if can_pickup:
+	if can_pickup_inventory_wise:
+		prompt_label.modulate = Color.WHITE
 		prompt_label.text = prompt_text
 		prompt_label.visible = true
-	elif prompt_label.modulate != Color.RED: # Only show "Inventory Full" if we can't pick up
-		prompt_label.text = "[Inventory Full]"
-		prompt_label.modulate = Color.RED # Make it red
+	else:
+		prompt_label.modulate = Color.RED
+		prompt_label.text = prompt_text # Already "[Inventory Full]"
 		prompt_label.visible = true
 
 
@@ -346,4 +314,4 @@ func show_prompt(_player_node: Node2D = null) -> void: # Optional player referen
 func hide_prompt() -> void:
 	if is_instance_valid(prompt_label):
 		prompt_label.visible = false
-		prompt_label.modulate = Color.WHITE # Reset color modulation
+		prompt_label.modulate = Color.WHITE
