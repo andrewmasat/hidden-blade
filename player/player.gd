@@ -1,6 +1,5 @@
-# player.gd
+# Player.gd
 class_name Player
-
 extends CharacterBody2D
 
 const DebugItemResource = preload("res://items/consumable_potion_health.tres")
@@ -42,6 +41,7 @@ var current_dashes: int :
 
 # State Variables
 var peer_id: int = 0
+var player_name: String = "Ninja" : set = set_player_name
 var current_state: State = State.IDLE_RUN
 var last_direction: Vector2 = Vector2.DOWN
 var equipped_item_data: ItemData = null
@@ -60,21 +60,18 @@ var _just_dropped_item_timer: Timer = Timer.new()
 @onready var dash_recharge_timer = $DashRechargeTimer
 @onready var animation_player = $AnimationPlayer
 @onready var hud = get_tree().get_first_node_in_group("HUD")
+@onready var nameplate_positioner: Node2D = $NameplatePositioner
+@onready var nameplate_node: Control = $NameplatePositioner/Nameplate
 
 func _ready():
 	peer_id = name.to_int() # This should now work as spawner names it with peer ID
 	print("Player [", name, "] _ready. Peer ID:", peer_id, " Is Auth:", is_multiplayer_authority(), " Initial GlobalPos:", global_position.round())
 
-	if not is_multiplayer_authority():
-		var camera = find_child("Camera2D", true, false) # Example
-		if camera: camera.enabled = false
-	else:
-		# This IS the locally controlled player
-		var camera = find_child("Camera2D", true, false)
-		if camera: camera.enabled = true
-		# SceneManager.player_node is now set by Main.gd after spawn
-		# If player needs its own initial spawn point on first adding to scene:
-		# (This is now handled by Main.gd setting local_player_node.global_position)
+	_update_nameplate_if_ready()
+
+	var camera = find_child("Camera2D", true, false)
+	if camera:
+		camera.enabled = is_multiplayer_authority()
 
 	self.current_health = max_health
 	self._current_dashes = max_dashes
@@ -111,8 +108,6 @@ func _physics_process(delta: float):
 				if animation_player.has_animation(new_anim_name):
 					animation_player.play(new_anim_name)
 					_synced_animation_name = new_anim_name
-					# print_rich("[color=cyan]REMOTE Player [", name, "] Playing synced animation: ", new_anim_name, "[/color]") # DEBUG
-				# else: print_rich("[color=red]REMOTE Player [", name, "] Synced anim not found: ", new_anim_name, "[/color]")
 			elif new_anim_name.is_empty() and animation_player.is_playing():
 				# If synced animation is empty but player is still playing something, stop it or play default
 				# animation_player.stop() # Or play default like idle
@@ -184,6 +179,14 @@ func _unhandled_input(event): # Or _input
 		next_drop_is_personal = not next_drop_is_personal
 		print("Next drop will be personal:", next_drop_is_personal)
 
+func set_player_name(new_name: String):
+	if player_name == new_name: return
+	player_name = new_name
+	print("Player [", name, "] (Peer:", multiplayer.get_unique_id() if multiplayer else "N/A", ") name set/synced to:", player_name)
+
+	# Update nameplate if node is ready
+	if is_node_ready(): # Check if the Player node itself is ready
+		_update_nameplate_if_ready()
 
 @rpc("authority", "call_local", "reliable") # Only the authority (client for its own player) executes this
 func set_initial_network_position(pos: Vector2):
@@ -193,6 +196,17 @@ func set_initial_network_position(pos: Vector2):
 	global_position = pos
 	print("Player [", name, "] initial network position SET to:", pos, "by RPC.")
 
+func _update_nameplate_if_ready():
+	if is_instance_valid(nameplate_node) and nameplate_node.has_method("update_name"):
+		nameplate_node.update_name(player_name)
+		if is_multiplayer_authority(): # If this is the local player
+			nameplate_node.visible = false
+		else: # For remote players
+			nameplate_node.visible = true
+
+func initialize_networked_data(p_name: String, initial_pos: Vector2):
+	self.player_name = p_name
+	self.global_position = initial_pos
 
 # --- State Processing ---
 func process_idle_run_state(_delta: float):
@@ -365,7 +379,7 @@ func server_handle_item_drop_request(item_identifier: String, item_quantity_to_d
 		if not is_instance_valid(main_node_ref):
 			printerr("  -> Server Error: main_node_ref not found as child of Main node!")
 			return
-		var dropped_item_spawner = main_node_ref.find_child("DroppedItemSpawner", true, false)
+		var dropped_item_spawner = main_node_ref.dropped_item_spawner
 		if not is_instance_valid(dropped_item_spawner):
 			printerr("  -> Server Error: DroppedItemSpawner not found as child of Main node!")
 			return
@@ -403,7 +417,7 @@ func server_request_pickup_item_by_id(item_unique_id_to_pickup: String):
 	# This path needs to be robust. Assume Main node has DroppedItemSpawner, get its spawn_path.
 	var main_node = SceneManager.main_scene_root # Get main node reference
 	if not is_instance_valid(main_node): printerr("ServerPickup: Main node reference is invalid!"); return
-	var player_spawner_node = main_node.find_child("PlayerSpawner", true, false)
+	var player_spawner_node = main_node.player_spawner
 	if not is_instance_valid(player_spawner_node): printerr("ServerPickup: PlayerSpawner not found!"); return
 	var player_spawn_parent = player_spawner_node.get_node(player_spawner_node.spawn_path) if not player_spawner_node.spawn_path.is_empty() else player_spawner_node
 	if not is_instance_valid(player_spawn_parent): printerr("ServerPickup: Player spawn parent invalid!"); return
@@ -413,7 +427,7 @@ func server_request_pickup_item_by_id(item_unique_id_to_pickup: String):
 		printerr("ServerPickup: Could not find player node '", str(requesting_peer_id), "' on server.")
 		return
 
-	var dropped_item_spawner = main_node.find_child("DroppedItemSpawner", true, false)
+	var dropped_item_spawner = main_node.dropped_item_spawner
 	if not is_instance_valid(dropped_item_spawner): printerr("ServerPickup: DroppedItemSpawner not found!"); return
 
 	var actual_spawn_parent: Node = null
@@ -667,7 +681,7 @@ func find_nearby_stackable_dropped_item(item_id_to_match: String, at_position: V
 	# Get the node where dropped items live
 	var main_node_ref = SceneManager.main_scene_root
 	if not is_instance_valid(main_node_ref): return null
-	var dropped_item_spawner = main_node_ref.find_child("DroppedItemSpawner", true, false)
+	var dropped_item_spawner = main_node_ref.dropped_item_spawner
 	if not is_instance_valid(dropped_item_spawner): return null
 	var items_parent_node = dropped_item_spawner.get_node_or_null(dropped_item_spawner.spawn_path) if not dropped_item_spawner.spawn_path.is_empty() else dropped_item_spawner
 	if not is_instance_valid(items_parent_node): return null

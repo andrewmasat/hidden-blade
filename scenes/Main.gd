@@ -144,17 +144,24 @@ func _custom_player_spawn_function(peer_id_to_spawn_for_variant: Variant) -> Nod
 	# --- SERVER sets its OWN initial position directly ---
 	if peer_id == multiplayer.get_unique_id(): # If spawning for self (the server/host)
 		print("  -> CustomPlayerSpawn (Server Logic for SELF ID:", peer_id, "): Setting initial position directly.")
+		var char_name = "Player_" + str(peer_id)
 		var spawn_marker_name = "InitialSpawn"
 		var spawn_pos = Vector2.ZERO
+
 		if is_instance_valid(SceneManager.current_level_root):
 			var marker = SceneManager.current_level_root.find_child(spawn_marker_name, true, false) as Node2D
 			if marker: spawn_pos = marker.global_position
 			else: spawn_pos = SceneManager.current_level_root.global_position
-		player_instance.global_position = spawn_pos
-		print("  -> CustomPlayerSpawn (Server for SELF): Position set to ", spawn_pos)
-	# For OTHER clients, position will be set via RPC AFTER they confirm ready.
-	# Their MultiplayerSynchronizer will still sync it on spawn if configured,
-	# but the RPC gives an explicit re-set.
+
+		if player_instance.has_method("initialize_networked_data"):
+			player_instance.initialize_networked_data(char_name, spawn_pos)
+		else:
+			# Fallback direct set (less ideal as it bypasses setter logic if not careful)
+			player_instance.player_name = char_name
+			player_instance.global_position = spawn_pos
+		print("  -> CustomPlayerSpawn (Server Logic for ID:", peer_id, "): Initialized with name '", char_name, "' and position ", spawn_pos)
+		#player_instance.global_position = spawn_pos
+		#print("  -> CustomPlayerSpawn (Server for SELF): Position set to ", spawn_pos)
 
 	return player_instance
 
@@ -181,8 +188,6 @@ func client_player_node_ready_for_init(client_peer_id_arg: int):
 		# Call RPC on the client's player node to set its position
 		client_player_on_server.rpc("set_initial_network_position", spawn_pos)
 		print("  -> Main (Server): Sent set_initial_network_position RPC to Player [", client_peer_id_arg, "] with pos ", spawn_pos)
-	else:
-		printerr("Main (Server): Could not find client [", client_peer_id_arg, "]'s player node on server to send position RPC.")
 
 
 func _wait_and_setup_local_player_client():
@@ -304,12 +309,10 @@ func _setup_local_player_references(player_node_name_is_peer_id_str: String) -> 
 	local_player_node = found_player_node as CharacterBody2D
 
 	if is_instance_valid(local_player_node):
+		print("Main: Local player node '", local_player_node.name, "' reference SET for SceneManager.")
 		SceneManager.player_node = local_player_node
 
-		print("Main: Local player node '", local_player_node.name, "' reference SET in SceneManager.")
-
-		print("Main: New game setup for player '", local_player_node.name, "'. Position is synced from server.")
-		if local_player_node.has_method("end_scene_transition"): # Reset to IDLE_RUN
+		if local_player_node.has_method("end_scene_transition"):
 			local_player_node.call_deferred("end_scene_transition")
 	else:
 		printerr("Main Error: Failed to get local player node '", player_node_name_is_peer_id_str, "' under '", actual_spawn_parent_node.name, "' after waiting. Children are:", actual_spawn_parent_node.get_children())
