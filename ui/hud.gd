@@ -9,6 +9,9 @@ const InventorySlotScene = preload("res://ui/inventory/InventorySlot.tscn")
 @onready var selection_indicator = $UIContainer/MarginContainer/VBoxContainer/Hotbar/SelectionIndicator
 @onready var inventory_panel = $UIContainer/InventoryPanel
 
+@onready var interaction_prompt_label = $UIContainer/MarginContainer/VBoxContainer/Hotbar/KeyboardShortcuts/Use
+
+
 # Keep track of references to slot elements for easier updates
 var slot_buttons: Array[Button] = []
 var slot_icons: Array[TextureRect] = []
@@ -103,6 +106,18 @@ func close_inventory():
 
 func is_inventory_open() -> bool:
 	return inventory_open
+
+func show_generic_interaction_prompt(text: String) -> void:
+	if is_instance_valid(interaction_prompt_label):
+		interaction_prompt_label.text = text
+		interaction_prompt_label.visible = true
+	else:
+		printerr("HUD: InteractionPromptLabel node not found!")
+
+func hide_generic_interaction_prompt() -> void:
+	if is_instance_valid(interaction_prompt_label):
+		interaction_prompt_label.visible = false
+	# else: It's fine if it's not found when trying to hide, might already be null
 
 # --- Signal Callback Functions ---
 

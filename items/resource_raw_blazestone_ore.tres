@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="ItemData" load_steps=3 format=3 uid="uid://5jwgk1ber4iy"]
+
+[ext_resource type="Script" uid="uid://cd5h74w7bgd82" path="res://scripts/ItemData.gd" id="1_itcx0"]
+[ext_resource type="Texture2D" uid="uid://e8egxlpy32po" path="res://assets/Items/User Interface/fg_icon_404.png" id="2_fivqs"]
+
+[resource]
+script = ExtResource("1_itcx0")
+item_id = "resource_raw_blazestone_ore"
+quantity = 1
+max_stack_size = 100
+texture = ExtResource("2_fivqs")
+item_type = 4
+heal_amount = 0
+damage = 0.0
+world_despawn_duration = 60.0
+metadata/_custom_type_script = "uid://cd5h74w7bgd82"

@@ -134,6 +134,7 @@ grow_vertical = 0
 alignment = 2
 
 [node name="Use" type="Button" parent="UIContainer/MarginContainer/VBoxContainer/Hotbar/KeyboardShortcuts"]
+visible = false
 layout_mode = 2
 theme_override_constants/outline_size = 2
 text = "Use"

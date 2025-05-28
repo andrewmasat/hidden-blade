@@ -375,6 +375,97 @@ func _custom_dropped_item_spawn_function(data: Dictionary) -> Node:
 	return dropped_item
 
 
+@rpc("any_peer", "call_local", "reliable") # Client (any_peer) calls this, server (ID 1) executes it locally
+func server_process_gather_request(node_path_from_level: NodePath):
+	if not multiplayer.is_server(): return # Should only run on server
+
+	var requesting_peer_id = multiplayer.get_remote_sender_id()
+	if requesting_peer_id == 0: # This can happen if host calls it on self before fully "connected"
+		if multiplayer.get_unique_id() == 1:
+			requesting_peer_id = 1 
+		else: # Should not happen for actual remote clients
+			printerr("Main (Server): server_process_gather_request from invalid sender_id 0")
+			return
+
+	print("Main (Server): Received gather request from peer [", requesting_peer_id, "] for node path '", node_path_from_level, "'")
+
+	# 1. Find the ResourceNode instance on the server
+	if not is_instance_valid(SceneManager.current_level_root):
+		printerr("  -> Server Error: current_level_root is invalid. Cannot find ResourceNode.")
+		return
+
+	var resource_node = SceneManager.current_level_root.get_node_or_null(node_path_from_level) as ResourceNode
+
+	if not is_instance_valid(resource_node):
+		printerr("  -> Server Error: ResourceNode not found at path '", node_path_from_level, "' relative to '", SceneManager.current_level_root.name, "'.")
+		return
+
+	if not resource_node.is_multiplayer_authority(): # Server should have authority over these nodes
+		printerr("  -> Server Warning: Server does not have authority over ResourceNode '", resource_node.name, "'. Interaction might fail or be unsynced.")
+		# This usually means the node wasn't set up correctly for server ownership,
+		# or it's not being spawned by a server-controlled MultiplayerSpawner.
+
+	if resource_node.is_depleted:
+		print("  -> Node '", resource_node.name, "' is already depleted. No action.")
+		# Optionally, RPC back to client: "action_failed_depleted"
+		return
+
+	# 2. Find the Player node instance for the requesting client ON THE SERVER
+	var actual_player_parent_node: Node
+	if player_spawner.spawn_path.is_empty() or player_spawner.spawn_path == NodePath("."):
+		actual_player_parent_node = player_spawner
+	else:
+		actual_player_parent_node = player_spawner.get_node_or_null(player_spawner.spawn_path)
+
+	if not is_instance_valid(actual_player_parent_node):
+		printerr("  -> Server Error: Could not find the actual parent node for players based on PlayerSpawner's spawn_path: '", player_spawner.spawn_path, "'")
+		return
+
+	# Now use actual_player_parent_node to find the player:
+	var requesting_player_node_on_server = actual_player_parent_node.get_node_or_null(str(requesting_peer_id)) as Player
+	if not is_instance_valid(requesting_player_node_on_server):
+		printerr("  -> Server Error: Could not find player node '", str(requesting_peer_id), "' under '", actual_player_parent_node.name, "'. Children are: ", actual_player_parent_node.get_children())
+		return
+
+	# 3. Server-side tool check (Authoritative)
+	var required_tool = resource_node.required_tool_type
+	var player_has_tool = false
+	# To check equipped item, server needs player's synced equipped item data
+	# For now, let's assume a simpler check or that server knows.
+	# This requires the equipped item to be accurately synced TO THE SERVER's representation of the player.
+	# Let's add a placeholder on server-side player for its equipped item (to be properly synced later)
+	var server_player_equipped_item_type = ItemData.ItemType.MISC # Placeholder
+	if requesting_player_node_on_server.has_method("get_server_authoritative_equipped_item_type"): # Ideal
+		server_player_equipped_item_type = requesting_player_node_on_server.get_server_authoritative_equipped_item_type()
+	elif is_instance_valid(requesting_player_node_on_server.equipped_item_data): # Fallback to direct access if not properly synced yet
+		server_player_equipped_item_type = requesting_player_node_on_server.equipped_item_data.item_type
+
+
+	if required_tool == ItemData.ItemType.MISC:
+		player_has_tool = true
+	elif server_player_equipped_item_type == required_tool: # Check server's knowledge
+		player_has_tool = true
+
+	if not player_has_tool:
+		print("  -> Server: Peer [", requesting_peer_id, "] tool requirement not met for '", resource_node.name, "'. Needs: ", ItemData.ItemType.keys()[required_tool])
+		# Optionally, RPC back to client: "action_failed_no_tool"
+		return
+
+	# 4. Server performs the gather action on the resource node
+	var yielded_item_info: Dictionary = resource_node.on_gather_interaction() # This runs on server's instance
+
+	# 5. If items were yielded, send them to the specific client
+	if yielded_item_info.has("item_id") and yielded_item_info.has("quantity"):
+		var item_id_to_send = yielded_item_info.get("item_id")
+		var quantity_to_send = yielded_item_info.get("quantity")
+
+		print("  -> Server: Node yielded ", quantity_to_send, "x ", item_id_to_send, ". Sending to client [", requesting_peer_id, "]")
+		# RPC to the specific client's Player node instance
+		requesting_player_node_on_server.rpc("client_receive_gathered_items", item_id_to_send, quantity_to_send)
+	else:
+		print("  -> Server: Node '", resource_node.name, "' was hit, but no items yielded this time (or became depleted by this hit). State will be synced.")
+		# The MultiplayerSynchronizer on ResourceNode will handle syncing its depleted state.
+
 # --- Pause/Resume Logic ---
 func pause_game() -> void:
 	if get_tree().paused: return # Already paused

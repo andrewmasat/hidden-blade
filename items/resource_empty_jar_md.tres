@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="ItemData" load_steps=3 format=3 uid="uid://nwtv7unhwsjf"]
+
+[ext_resource type="Script" uid="uid://cd5h74w7bgd82" path="res://scripts/ItemData.gd" id="1_u66vp"]
+[ext_resource type="Texture2D" uid="uid://ciq1sf0dmoas7" path="res://assets/Items/User Interface/fg_icon_222.png" id="2_u66vp"]
+
+[resource]
+script = ExtResource("1_u66vp")
+item_id = "resource_empty_jar_md"
+quantity = 1
+max_stack_size = 100
+texture = ExtResource("2_u66vp")
+item_type = 4
+heal_amount = 0
+damage = 0.0
+world_despawn_duration = 60.0
+metadata/_custom_type_script = "uid://cd5h74w7bgd82"

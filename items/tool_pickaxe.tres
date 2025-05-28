@@ -1,5 +1,6 @@
-[gd_resource type="Resource" script_class="ItemData" load_steps=3 format=3 uid="uid://b06dl00tagss3"]
+[gd_resource type="Resource" script_class="ItemData" load_steps=4 format=3 uid="uid://b06dl00tagss3"]
 
+[ext_resource type="Texture2D" uid="uid://csgb6y7sakjya" path="res://assets/Items/Weapons/Pickaxe/SpriteInHand.png" id="1_6g58h"]
 [ext_resource type="Script" uid="uid://cd5h74w7bgd82" path="res://scripts/ItemData.gd" id="1_iv0un"]
 [ext_resource type="Texture2D" uid="uid://b4vng020m8vne" path="res://assets/Items/Tool/Pickaxe.png" id="2_rlwx4"]
 
@@ -10,4 +11,8 @@ quantity = 1
 max_stack_size = 1
 texture = ExtResource("2_rlwx4")
 item_type = 3
+heal_amount = 0
+equipped_texture = ExtResource("1_6g58h")
+damage = 0.0
+world_despawn_duration = 60.0
 metadata/_custom_type_script = "uid://cd5h74w7bgd82"

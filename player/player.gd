@@ -2,7 +2,7 @@
 class_name Player
 extends CharacterBody2D
 
-const DebugItemResource = preload("res://items/consumable_potion_health.tres")
+const DebugItemResource = preload("res://items/tool_pickaxe.tres")
 const DroppedItemScene = preload("res://world/DroppedItem.tscn")
 
 # Signals for HUD
@@ -46,6 +46,10 @@ var current_state: State = State.IDLE_RUN
 var last_direction: Vector2 = Vector2.DOWN
 var equipped_item_data: ItemData = null
 var nearby_items: Array[DroppedItem] = []
+var nearby_resource_nodes: Array[ResourceNode] = []
+#var synced_equipped_item_id: String = "" : set = set_synced_equipped_item_id
+var synced_equipped_item_texture_path: String = ""
+var _currently_targeted_resource_node: ResourceNode = null
 var _synced_animation_name: String = ""
 var _is_currently_processing_world_drop: bool = false
 var _currently_prompted_item: DroppedItem = null
@@ -119,6 +123,13 @@ func _physics_process(delta: float):
 
 	if is_multiplayer_authority():
 		_update_nearby_item_prompts()
+		_update_resource_node_target_and_prompt()
+		
+		if Input.is_action_just_pressed("use_item"):
+			if is_instance_valid(_currently_targeted_resource_node) and \
+				not _currently_targeted_resource_node.is_depleted:
+				# Attempt to gather from the targeted resource node
+				_try_gather_from_node(_currently_targeted_resource_node)
 
 	# Check if inventory is open (needs access to HUD state or a global flag)
 	var is_inventory_open = false
@@ -537,6 +548,21 @@ func client_add_item_to_inventory(item_identifier: String, quantity: int):
 		printerr("Player [", name, "] (Client): Could not reconstruct item from identifier '", item_identifier, "' for local inventory.")
 
 
+@rpc("call_local", "authority", "reliable") # Server calls this on the specific client
+func client_receive_gathered_items(item_id_yielded: String, quantity_yielded: int) -> void:
+	print("Player ", name, " (Client): Received items from server: ", quantity_yielded, "x ", item_id_yielded)
+
+	var item_base_res = ItemDatabase.get_item_base(item_id_yielded)
+	if item_base_res is ItemData:
+		var item_instance_to_add = item_base_res.duplicate()
+		item_instance_to_add.quantity = quantity_yielded
+		var success = Inventory.add_item(item_instance_to_add)
+		if not success:
+			print("  -> Inventory full, cannot add gathered item. (Client ", name, ")")
+			# TODO: Client-side feedback for "inventory full" from server instruction
+	else:
+		printerr("  -> Could not find item base for '", item_id_yielded, "' in ItemDatabase. (Client ", name, ")")
+
 func handle_world_drop(item_data_to_drop: ItemData, p_drop_mode: DroppedItem.DropMode = DroppedItem.DropMode.GLOBAL, p_owner_peer_id: int = 0):
 	if not is_multiplayer_authority():
 		printerr("Player [", name, "] handle_world_drop called but not authority.")
@@ -815,6 +841,50 @@ func _update_nearby_item_prompts() -> void:
 			_currently_prompted_item.hide_prompt()
 			_currently_prompted_item = null
 
+func _update_resource_node_target_and_prompt() -> void:
+	if not is_multiplayer_authority(): return # Only local player handles its own UI prompts
+
+	var best_target_node: ResourceNode = null
+	var min_dist_sq = INF
+
+	# Clean up invalid or depleted nodes from the list first
+	for i in range(nearby_resource_nodes.size() - 1, -1, -1):
+		var node = nearby_resource_nodes[i]
+		if not is_instance_valid(node) or node.is_depleted:
+			# If it was the current target and becomes invalid/depleted, clear the prompt
+			if _currently_targeted_resource_node == node:
+				if is_instance_valid(hud) and hud.has_method("hide_generic_interaction_prompt"):
+					hud.hide_generic_interaction_prompt()
+					_currently_targeted_resource_node = null
+			nearby_resource_nodes.remove_at(i)
+			continue
+
+		# Consider for distance if valid
+		var dist_sq = global_position.distance_squared_to(node.global_position)
+		if dist_sq < min_dist_sq:
+			min_dist_sq = dist_sq
+			best_target_node = node
+
+	# Update prompt based on best_target_node
+	if is_instance_valid(best_target_node):
+		if _currently_targeted_resource_node != best_target_node: # Target changed or new target found
+			_currently_targeted_resource_node = best_target_node
+			# Show prompt for the new target
+			if is_instance_valid(hud) and hud.has_method("show_generic_interaction_prompt"):
+				var prompt_message = "Gather (E)" # Default
+				if best_target_node.required_tool_type != ItemData.ItemType.MISC:
+					if not is_instance_valid(equipped_item_data) or \
+						equipped_item_data.item_type != best_target_node.required_tool_type:
+						prompt_message = "Requires " + ItemData.ItemType.keys()[best_target_node.required_tool_type].capitalize()
+				hud.show_generic_interaction_prompt(prompt_message)
+		# Else: Best target is already prompted, do nothing (or refresh if prompt can change dynamically)
+
+	else: # No best target found (or all nearby are depleted/invalid)
+		if is_instance_valid(_currently_targeted_resource_node): # If there *was* a target
+			if is_instance_valid(hud) and hud.has_method("hide_generic_interaction_prompt"):
+				hud.hide_generic_interaction_prompt()
+			_currently_targeted_resource_node = null
+
 # --- Equipping ---
 func _equip_item(item_data: ItemData):
 	# Clear previous equip state
@@ -846,12 +916,10 @@ func try_use_selected_item():
 
 		match selected_item.item_type:
 			ItemData.ItemType.CONSUMABLE:
-				# Check if the specific consumable CAN be used *before* consuming
 				if _can_use_consumable(selected_item):
 					_consume_item(selected_item, Inventory.selected_slot_index)
 				else:
 					print("Cannot use '", selected_item.item_id, "' right now (e.g., health full).")
-			# ... (other item types remain the same) ...
 			ItemData.ItemType.WEAPON:
 				print("Selected item is a weapon. Attack action is separate.")
 			ItemData.ItemType.TOOL:
@@ -862,6 +930,41 @@ func try_use_selected_item():
 				print("Selected item type cannot be 'used' directly:", ItemData.ItemType.keys()[selected_item.item_type])
 	else:
 		print("No item selected to use.")
+
+func _try_gather_from_node(node_to_gather_from: ResourceNode) -> void:
+	if not is_multiplayer_authority(): return
+	if not is_instance_valid(node_to_gather_from): return
+
+	print("Player ", name, " requesting to gather from: ", node_to_gather_from.name)
+
+	# 1. Client-side tool check (still good for immediate feedback)
+	var required_tool = node_to_gather_from.required_tool_type
+	var has_required_tool = false
+	if required_tool == ItemData.ItemType.MISC:
+		has_required_tool = true
+	elif is_instance_valid(equipped_item_data) and equipped_item_data.item_type == required_tool:
+		has_required_tool = true
+
+	if not has_required_tool:
+		print("  -> Tool requirement not met. Needs: ", ItemData.ItemType.keys()[required_tool])
+		if is_instance_valid(hud) and hud.has_method("show_temporary_message"): # Optional
+			hud.show_temporary_message("Requires " + ItemData.ItemType.keys()[required_tool].capitalize(), 1.5)
+		return
+		
+	if not is_instance_valid(SceneManager.current_level_root):
+		printerr("Player: Cannot get relative path for ResourceNode, current_level_root is invalid.")
+		return
+
+	var node_path_from_level: NodePath = SceneManager.current_level_root.get_path_to(node_to_gather_from)
+	if node_path_from_level.is_empty():
+		printerr("Player: Could not get path for ResourceNode: ", node_to_gather_from.name)
+		return
+
+	print("  -> Sending gather request to server for node path: ", node_path_from_level)
+
+	# RPC to Main.gd on the server (peer_id 1)
+	var main_node: Node2D = SceneManager.main_scene_root
+	main_node.rpc_id(1, "server_process_gather_request", node_path_from_level)
 
 func _can_use_consumable(item_data: ItemData) -> bool:
 	if item_data == null or not item_data is ItemData: return false
@@ -1001,19 +1104,19 @@ func _on_dash_recharge_timer_timeout():
 	else:
 		print("Dash charges full.")
 
-func _on_pickup_area_entered(area):
+func _on_pickup_area_entered(area: Area2D) -> void:
 	if area is DroppedItem:
 		var item = area as DroppedItem
 		if is_instance_valid(item) and not item in nearby_items:
 			nearby_items.append(item)
+	elif area.is_in_group("resource_node_interaction_zone"): # Check the group you assigned
+		var resource_node = area.get_owner() as ResourceNode # Assuming the Area2D's owner is the ResourceNode
+		if is_instance_valid(resource_node) and not resource_node in nearby_resource_nodes:
+			if not resource_node.is_depleted: # Only add if not initially depleted
+				nearby_resource_nodes.append(resource_node)
 	elif area.is_in_group("player_pickup_area"):
 		pass
-
-	# --- Handle other types of interactable areas if needed ---
-	# elif area.is_in_group("NPC"):
-	#     hud.show_interaction_prompt("Talk (F)")
-	# elif area.is_in_group("Chest"):
-	#     hud.show_interaction_prompt("Open (F)")
+	# ... (rest of your existing logic for other area types) ...
 	else:
 		print("Player pickup area entered unknown/unhandled area type:", area.name, " (Owner: ", area.get_owner().name if area.get_owner() else "None", ")")
 
@@ -1022,15 +1125,18 @@ func _on_pickup_area_exited(area):
 		var item = area as DroppedItem
 		if item in nearby_items:
 			nearby_items.erase(item)
-			# If this item was the one being prompted, player logic will hide it
 			if _currently_prompted_item == item:
 				if is_instance_valid(item): item.hide_prompt() # Hide its prompt
 				_currently_prompted_item = null
-			# _update_nearby_item_prompts will re-evaluate next frame
-
-	# --- Handle other types ---
-	# elif area.is_in_group("NPC") or area.is_in_group("Chest"):
-	#     hud.hide_interaction_prompt()
+	elif area.is_in_group("resource_node_interaction_zone"): # Check the group
+		var resource_node = area.get_owner() as ResourceNode
+		if resource_node in nearby_resource_nodes:
+			nearby_resource_nodes.erase(resource_node)
+			# If this node was the targeted one, clear the target and its HUD prompt
+			if _currently_targeted_resource_node == resource_node:
+				if is_instance_valid(hud) and hud.has_method("hide_generic_interaction_prompt"):
+					hud.hide_generic_interaction_prompt()
+				_currently_targeted_resource_node = null
 
 func _on_animation_finished(_anim_name: String):
 	# Keep existing attack animation logic
