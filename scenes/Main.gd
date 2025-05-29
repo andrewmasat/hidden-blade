@@ -459,9 +459,14 @@ func server_process_gather_request(node_path_from_level: NodePath):
 		var item_id_to_send = yielded_item_info.get("item_id")
 		var quantity_to_send = yielded_item_info.get("quantity")
 
-		print("  -> Server: Node yielded ", quantity_to_send, "x ", item_id_to_send, ". Sending to client [", requesting_peer_id, "]")
-		# RPC to the specific client's Player node instance
-		requesting_player_node_on_server.rpc("client_receive_gathered_items", item_id_to_send, quantity_to_send)
+		if requesting_peer_id == multiplayer.get_unique_id(): # If the server is processing for itself (host)
+			print("  -> Server (Host) is processing for self. Calling client_receive_gathered_items directly on its Player node.")
+			requesting_player_node_on_server.client_receive_gathered_items(item_id_to_send, quantity_to_send) # Direct call
+		else:
+			# For a remote client, RPC to that specific client's peer_id,
+			# telling it to execute on its instance of the player node.
+			print("  -> Server: Sending RPC client_receive_gathered_items to remote PEER [", requesting_peer_id, "] for their PlayerNode '", requesting_player_node_on_server.name, "'")
+			requesting_player_node_on_server.rpc_id(requesting_peer_id, "client_receive_gathered_items", item_id_to_send, quantity_to_send)
 	else:
 		print("  -> Server: Node '", resource_node.name, "' was hit, but no items yielded this time (or became depleted by this hit). State will be synced.")
 		# The MultiplayerSynchronizer on ResourceNode will handle syncing its depleted state.

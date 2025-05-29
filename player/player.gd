@@ -47,13 +47,19 @@ var last_direction: Vector2 = Vector2.DOWN
 var equipped_item_data: ItemData = null
 var nearby_items: Array[DroppedItem] = []
 var nearby_resource_nodes: Array[ResourceNode] = []
-#var synced_equipped_item_id: String = "" : set = set_synced_equipped_item_id
-var synced_equipped_item_texture_path: String = ""
 var _currently_targeted_resource_node: ResourceNode = null
 var _synced_animation_name: String = ""
 var _is_currently_processing_world_drop: bool = false
 var _currently_prompted_item: DroppedItem = null
 var _just_dropped_item_timer: Timer = Timer.new()
+
+var _current_equipped_item_data_for_visuals: ItemData = null
+var synced_equipped_item_id: String = "" :
+	set(value):
+		if synced_equipped_item_id == value: return
+		synced_equipped_item_id = value
+		if not is_multiplayer_authority(): # If this is a remote player instance
+			_update_remote_equipped_visuals()
 
 # Node References
 @onready var animated_sprite = $AnimatedSprite2D
@@ -548,9 +554,11 @@ func client_add_item_to_inventory(item_identifier: String, quantity: int):
 		printerr("Player [", name, "] (Client): Could not reconstruct item from identifier '", item_identifier, "' for local inventory.")
 
 
-@rpc("call_local", "authority", "reliable") # Server calls this on the specific client
+@rpc("any_peer", "call_local", "reliable")
 func client_receive_gathered_items(item_id_yielded: String, quantity_yielded: int) -> void:
-	print("Player ", name, " (Client): Received items from server: ", quantity_yielded, "x ", item_id_yielded)
+	if not is_multiplayer_authority():
+		print("Player NODE [", name, "] on PEER [", multiplayer.get_unique_id(), "] received client_receive_gathered_items BUT IS NOT AUTHORITY. Ignoring.")
+		return
 
 	var item_base_res = ItemDatabase.get_item_base(item_id_yielded)
 	if item_base_res is ItemData:
@@ -780,6 +788,32 @@ func _update_hand_and_weapon_animation():
 		# e.g., if weapon sprite visibility depends on current_state or animation name.
 		pass
 
+func _update_remote_equipped_visuals() -> void:
+	if is_multiplayer_authority(): return # Should only run on remote instances
+
+	print("Player [", name, "] (Remote) updating visuals for synced_equipped_item_id: '", synced_equipped_item_id, "'")
+
+	_current_equipped_item_data_for_visuals = null # Reset
+	if not synced_equipped_item_id.is_empty():
+		_current_equipped_item_data_for_visuals = ItemDatabase.get_item_base(synced_equipped_item_id)
+
+	if is_instance_valid(equipped_item_sprite):
+		if is_instance_valid(_current_equipped_item_data_for_visuals) and \
+			_current_equipped_item_data_for_visuals.is_equippable() and \
+			is_instance_valid(_current_equipped_item_data_for_visuals.equipped_texture):
+			equipped_item_sprite.texture = _current_equipped_item_data_for_visuals.equipped_texture
+			equipped_item_sprite.visible = true
+			print("  -> Remote visual set to: ", _current_equipped_item_data_for_visuals.item_id)
+		else:
+			equipped_item_sprite.texture = null
+			equipped_item_sprite.visible = false
+			if synced_equipped_item_id.is_empty():
+				print("  -> Remote visual cleared (no item).")
+			else:
+				print("  -> Remote visual could not be set (item '", synced_equipped_item_id, "' not found, not equippable, or no texture).")
+
+	_update_hand_and_weapon_animation() # Update hand position etc.
+
 func _update_nearby_item_prompts() -> void:
 	if not is_multiplayer_authority(): return
 
@@ -887,24 +921,48 @@ func _update_resource_node_target_and_prompt() -> void:
 
 # --- Equipping ---
 func _equip_item(item_data: ItemData):
-	# Clear previous equip state
-	equipped_item_data = null
-	if equipped_item_sprite: equipped_item_sprite.visible = false
+	if not is_multiplayer_authority():
+		# Remote players should not directly call _equip_item based on their own inventory signals.
+		# Their visuals are driven by synced_equipped_item_id.
+		# However, if _equip_item IS called on a remote instance for some other reason,
+		# ensure it doesn't try to update synced_equipped_item_id.
+		# The _update_remote_equipped_visuals handles their sprite.
+		if is_instance_valid(equipped_item_sprite):
+			# This is a bit redundant if _update_remote_equipped_visuals is robust,
+			# but ensures remote instances don't take over their visuals if _equip_item is accidentally called.
+			if _current_equipped_item_data_for_visuals and is_instance_valid(_current_equipped_item_data_for_visuals.equipped_texture):
+				equipped_item_sprite.texture = _current_equipped_item_data_for_visuals.equipped_texture
+				equipped_item_sprite.visible = true
+			else:
+				equipped_item_sprite.texture = null
+				equipped_item_sprite.visible = false
+		return
 
-	# Check if the new item is valid and equippable
+	# Local authority player's logic:
+	var previous_equipped_id = ""
+	if is_instance_valid(equipped_item_data): # Your existing variable for local logic
+		previous_equipped_id = equipped_item_data.item_id
+
+	equipped_item_data = null # Clear previous state for local logic
+	if is_instance_valid(equipped_item_sprite): equipped_item_sprite.visible = false
+
+	var new_synced_id = ""
 	if item_data != null and item_data is ItemData and item_data.is_equippable():
-		equipped_item_data = item_data
-		if equipped_item_sprite:
-			# Use the EQUIPPED texture now
+		equipped_item_data = item_data # For local player's direct logic (e.g., attack checks)
+		if is_instance_valid(equipped_item_sprite):
 			equipped_item_sprite.texture = item_data.equipped_texture
-			equipped_item_sprite.visible = (item_data.equipped_texture != null) # Only show if texture exists
-		print("Player equipped:", equipped_item_data.item_id)
-		# Trigger animation update immediately to position hand correctly
-		_update_hand_and_weapon_animation()
+			equipped_item_sprite.visible = (item_data.equipped_texture != null)
+		print("Player [", name, "] (Local Authority) equipped:", equipped_item_data.item_id)
+		new_synced_id = equipped_item_data.item_id
 	else:
-		print("Player equipped nothing (or item not equippable).")
-		# Ensure hand position/weapon visibility resets if nothing equipped
-		_update_hand_and_weapon_animation()
+		print("Player [", name, "] (Local Authority) equipped nothing (or item not equippable).")
+		new_synced_id = "" # Equipped nothing
+
+	# Update the synced variable if it has changed
+	if self.synced_equipped_item_id != new_synced_id:
+		self.synced_equipped_item_id = new_synced_id # This will trigger the setter and sync
+
+	_update_hand_and_weapon_animation() # Update hand position etc.
 
 func try_use_selected_item():
 	var selected_item: ItemData = Inventory.get_selected_item()
@@ -1145,10 +1203,9 @@ func _on_animation_finished(_anim_name: String):
 		_update_hand_and_weapon_animation()
 
 func _on_selected_slot_changed(_new_index: int, _old_index: int, item_data: ItemData):
-	print("Player detected selected slot change. New Item:", item_data)
-	# --- KEEP CHECK FOR DRAG FLAG ---
-	if Inventory.is_dragging_selected_slot and item_data == null:
-		print("  -> Player: Ignoring equip(null) because selected slot is being dragged.")
-		return
-	# -----------------------------
-	_equip_item(item_data)
+	if is_multiplayer_authority(): # Only the authoritative player processes their own inventory selection
+		print("Player [", name, "] detected selected slot change. New Item:", item_data)
+		if Inventory.is_dragging_selected_slot and item_data == null:
+			print("  -> Player: Ignoring equip(null) because selected slot is being dragged.")
+			return
+		_equip_item(item_data)
