@@ -1205,7 +1205,4 @@ func _on_animation_finished(_anim_name: String):
 func _on_selected_slot_changed(_new_index: int, _old_index: int, item_data: ItemData):
 	if is_multiplayer_authority(): # Only the authoritative player processes their own inventory selection
 		print("Player [", name, "] detected selected slot change. New Item:", item_data)
-		if Inventory.is_dragging_selected_slot and item_data == null:
-			print("  -> Player: Ignoring equip(null) because selected slot is being dragged.")
-			return
 		_equip_item(item_data)

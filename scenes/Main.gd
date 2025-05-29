@@ -428,28 +428,30 @@ func server_process_gather_request(node_path_from_level: NodePath):
 		return
 
 	# 3. Server-side tool check (Authoritative)
-	var required_tool = resource_node.required_tool_type
-	var player_has_tool = false
-	# To check equipped item, server needs player's synced equipped item data
-	# For now, let's assume a simpler check or that server knows.
-	# This requires the equipped item to be accurately synced TO THE SERVER's representation of the player.
-	# Let's add a placeholder on server-side player for its equipped item (to be properly synced later)
-	var server_player_equipped_item_type = ItemData.ItemType.MISC # Placeholder
-	if requesting_player_node_on_server.has_method("get_server_authoritative_equipped_item_type"): # Ideal
-		server_player_equipped_item_type = requesting_player_node_on_server.get_server_authoritative_equipped_item_type()
-	elif is_instance_valid(requesting_player_node_on_server.equipped_item_data): # Fallback to direct access if not properly synced yet
-		server_player_equipped_item_type = requesting_player_node_on_server.equipped_item_data.item_type
+	var required_tool_type_for_node = resource_node.required_tool_type # Renamed for clarity
+	var player_has_correct_tool = false
 
+	if required_tool_type_for_node == ItemData.ItemType.MISC:
+		player_has_correct_tool = true
+	else:
+		# Use the synced_equipped_item_id from the server's instance of the player node
+		var currently_equipped_id_on_server = requesting_player_node_on_server.synced_equipped_item_id
 
-	if required_tool == ItemData.ItemType.MISC:
-		player_has_tool = true
-	elif server_player_equipped_item_type == required_tool: # Check server's knowledge
-		player_has_tool = true
-
-	if not player_has_tool:
-		print("  -> Server: Peer [", requesting_peer_id, "] tool requirement not met for '", resource_node.name, "'. Needs: ", ItemData.ItemType.keys()[required_tool])
-		# Optionally, RPC back to client: "action_failed_no_tool"
-		return
+		if not currently_equipped_id_on_server.is_empty():
+			var equipped_item_base_on_server = ItemDatabase.get_item_base(currently_equipped_id_on_server)
+			if is_instance_valid(equipped_item_base_on_server):
+				if equipped_item_base_on_server.item_type == required_tool_type_for_node:
+					player_has_correct_tool = true
+				else:
+					print("  -> Server: Peer [", requesting_peer_id, "] has item '", currently_equipped_id_on_server, "' (type ", ItemData.ItemType.keys()[equipped_item_base_on_server.item_type] ,") but needs type ", ItemData.ItemType.keys()[required_tool_type_for_node])
+			else:
+				print("  -> Server: Peer [", requesting_peer_id, "] has unknown item_id '", currently_equipped_id_on_server, "' equipped according to sync.")
+		else:
+			print("  -> Server: Peer [", requesting_peer_id, "] has nothing equipped according to sync.")
+			
+	if not player_has_correct_tool:
+		print("  -> Server: Peer [", requesting_peer_id, "] tool requirement not met for '", resource_node.name, "'. Needs type: ", ItemData.ItemType.keys()[required_tool_type_for_node])
+		return # Stop processing if tool check fails
 
 	# 4. Server performs the gather action on the resource node
 	var yielded_item_info: Dictionary = resource_node.on_gather_interaction() # This runs on server's instance
