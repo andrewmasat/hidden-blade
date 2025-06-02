@@ -1,4 +1,4 @@
-[gd_scene load_steps=5 format=3 uid="uid://tw0hsqml6e1y"]
+[gd_scene load_steps=6 format=3 uid="uid://tw0hsqml6e1y"]
 
 [ext_resource type="Script" uid="uid://bm3ypst306flb" path="res://world/ResourceNode.gd" id="1_tca2k"]
 
@@ -13,6 +13,10 @@ properties/1/replication_mode = 1
 [sub_resource type="PlaceholderTexture2D" id="PlaceholderTexture2D_i3eeo"]
 size = Vector2(16, 16)
 
+[sub_resource type="CapsuleShape2D" id="CapsuleShape2D_tca2k"]
+radius = 3.0
+height = 12.0
+
 [sub_resource type="CircleShape2D" id="CircleShape2D_tca2k"]
 radius = 13.0384
 
@@ -24,12 +28,20 @@ replication_config = SubResource("SceneReplicationConfig_tca2k")
 
 [node name="Sprite2D" type="Sprite2D" parent="."]
 texture = SubResource("PlaceholderTexture2D_i3eeo")
+offset = Vector2(0, -5)
+
+[node name="StaticBody2D" type="StaticBody2D" parent="."]
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="StaticBody2D"]
+position = Vector2(0, -5)
+shape = SubResource("CapsuleShape2D_tca2k")
 
 [node name="InteractionArea" type="Area2D" parent="." groups=["resource_node_interaction_zone"]]
 collision_layer = 256
 collision_mask = 2
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="InteractionArea"]
+position = Vector2(0, -5)
 shape = SubResource("CircleShape2D_tca2k")
 
 [node name="RespawnTimer" type="Timer" parent="."]

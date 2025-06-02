@@ -8,6 +8,7 @@ const InventorySlotScene = preload("res://ui/inventory/InventorySlot.tscn")
 @onready var hotbar_container = $UIContainer/MarginContainer/VBoxContainer/Hotbar/HotbarContainer
 @onready var selection_indicator = $UIContainer/MarginContainer/VBoxContainer/Hotbar/SelectionIndicator
 @onready var inventory_panel = $UIContainer/InventoryPanel
+@onready var crafting_menu_instance = $UIContainer/CraftingMenuInstance
 
 @onready var interaction_prompt_label = $UIContainer/MarginContainer/VBoxContainer/Hotbar/KeyboardShortcuts/Use
 
@@ -18,6 +19,7 @@ var slot_icons: Array[TextureRect] = []
 var hotbar_slot_instances: Array[Control] = []
 # var slot_quantities: Array[Label] = [] # Uncomment if using quantity labels
 var inventory_open: bool = false
+var crafting_menu_open: bool = false
 var previous_mouse_mode = Input.get_mouse_mode()
 
 # Store dash icon texture to reuse
@@ -32,6 +34,10 @@ func _ready():
 		inventory_panel.close_requested.connect(close_inventory)
 	else:
 		printerr("HUD Error: InventoryPanel node not found!")
+	if not is_instance_valid(crafting_menu_instance):
+		printerr("HUD Error: CraftingMenuInstance node not found!")
+	else:
+		crafting_menu_instance.visible = false # Ensure hidden
 	previous_mouse_mode = Input.get_mouse_mode()
 
 	# --- Connect to Global Inventory signals ---
@@ -56,6 +62,25 @@ func _unhandled_input(event):
 	# Handle Esc Key ONLY if inventory is currently open
 	elif inventory_open and event.is_action_pressed("ui_cancel"):
 		close_inventory() # Use the centralized close function
+		get_viewport().set_input_as_handled()
+
+	if event.is_action_pressed("toggle_inventory"):
+		if crafting_menu_open: # If crafting is open, inventory key closes it
+			close_crafting_menu()
+		else:
+			toggle_inventory_panel() # Original inventory toggle
+		get_viewport().set_input_as_handled()
+	
+	elif event.is_action_pressed("toggle_crafting_menu"): # New input action
+		toggle_crafting_menu()
+		get_viewport().set_input_as_handled()
+
+	elif inventory_open and event.is_action_pressed("ui_cancel"): # Esc for inventory
+		close_inventory()
+		get_viewport().set_input_as_handled()
+	
+	elif crafting_menu_open and event.is_action_pressed("ui_cancel"): # Esc for crafting
+		close_crafting_menu()
 		get_viewport().set_input_as_handled()
 
 func setup_hotbar_slots():
@@ -106,6 +131,38 @@ func close_inventory():
 
 func is_inventory_open() -> bool:
 	return inventory_open
+
+func toggle_crafting_menu():
+	if crafting_menu_open:
+		close_crafting_menu()
+	else:
+		open_crafting_menu()
+
+func open_crafting_menu():
+	if not is_instance_valid(crafting_menu_instance): return
+	if crafting_menu_open: return
+
+	# Close main inventory if it's open
+	if inventory_open:
+		close_inventory()
+
+	crafting_menu_open = true
+	crafting_menu_instance.open_menu() # Call the menu's own open function
+	previous_mouse_mode = Input.get_mouse_mode() # Store current mode
+	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
+	print("HUD: Crafting menu opened.")
+
+func close_crafting_menu():
+	if not is_instance_valid(crafting_menu_instance): return
+	if not crafting_menu_open: return
+
+	crafting_menu_open = false
+	crafting_menu_instance.close_menu() # Call the menu's own close function
+	Input.set_mouse_mode(previous_mouse_mode) # Restore previous mouse mode
+	print("HUD: Crafting menu closed.")
+
+func is_crafting_menu_open() -> bool:
+	return crafting_menu_open
 
 func show_generic_interaction_prompt(text: String) -> void:
 	if is_instance_valid(interaction_prompt_label):

@@ -1,0 +1,35 @@
+[gd_scene load_steps=3 format=3 uid="uid://dov8gh4dbehju"]
+
+[ext_resource type="Script" uid="uid://6gmiuommehtn" path="res://ui/crafting/RecipeEntry.gd" id="1_ibdnp"]
+
+[sub_resource type="PlaceholderTexture2D" id="PlaceholderTexture2D_gvk6k"]
+
+[node name="RecipeEntry" type="Button"]
+custom_minimum_size = Vector2(180, 42)
+offset_right = 8.0
+offset_bottom = 8.0
+toggle_mode = true
+script = ExtResource("1_ibdnp")
+
+[node name="HBoxContainer" type="HBoxContainer" parent="."]
+layout_mode = 0
+offset_left = 5.0
+offset_top = 5.0
+offset_right = 95.0
+offset_bottom = 37.0
+theme_override_constants/separation = 10
+
+[node name="ItemIcon" type="TextureRect" parent="HBoxContainer"]
+custom_minimum_size = Vector2(32, 32)
+layout_mode = 2
+texture = SubResource("PlaceholderTexture2D_gvk6k")
+expand_mode = 3
+
+[node name="ItemNameLabel" type="Label" parent="HBoxContainer"]
+layout_mode = 2
+text = "asdcasdc"
+vertical_alignment = 1
+
+[node name="CraftableCountLabel" type="Label" parent="HBoxContainer"]
+layout_mode = 2
+text = " x0"

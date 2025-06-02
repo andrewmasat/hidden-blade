@@ -1,16 +1,18 @@
 [gd_resource type="Resource" script_class="ItemData" load_steps=3 format=3 uid="uid://qtvxyg2a63kd"]
 
 [ext_resource type="Script" uid="uid://cd5h74w7bgd82" path="res://scripts/ItemData.gd" id="1_n3tgp"]
-[ext_resource type="Texture2D" uid="uid://c8ptytokqttll" path="res://assets/Items/User Interface/fg_icon_468.png" id="2_l1p8k"]
+[ext_resource type="Texture2D" uid="uid://cil21a0jmw21k" path="res://assets/Items/User Interface/fg_icon_564.png" id="2_t1efp"]
 
 [resource]
 script = ExtResource("1_n3tgp")
-item_id = "resource_raw_moonsilver_ore"
+item_id = "resource_ore_verdanite"
+display_name = "Verdanite Ore"
 quantity = 1
 max_stack_size = 100
-texture = ExtResource("2_l1p8k")
+texture = ExtResource("2_t1efp")
 item_type = 4
 heal_amount = 0
 damage = 0.0
 world_despawn_duration = 60.0
+crafting_ingredients = Array[Dictionary]([])
 metadata/_custom_type_script = "uid://cd5h74w7bgd82"

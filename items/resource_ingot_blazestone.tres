@@ -1,0 +1,21 @@
+[gd_resource type="Resource" script_class="ItemData" load_steps=3 format=3 uid="uid://b2q1d5p3vv4sb"]
+
+[ext_resource type="Script" uid="uid://cd5h74w7bgd82" path="res://scripts/ItemData.gd" id="1_sdc54"]
+[ext_resource type="Texture2D" uid="uid://gy3nglcuemy2" path="res://assets/Items/User Interface/fg_icon_407.png" id="2_3k1kv"]
+
+[resource]
+script = ExtResource("1_sdc54")
+item_id = "resource_ingot_blazestone"
+display_name = "Blazestone Ingot"
+quantity = 1
+max_stack_size = 100
+texture = ExtResource("2_3k1kv")
+item_type = 4
+heal_amount = 0
+damage = 0.0
+world_despawn_duration = 60.0
+crafting_ingredients = Array[Dictionary]([{
+"item_id": "resource_ore_blazestone",
+"quantity": 2
+}])
+metadata/_custom_type_script = "uid://cd5h74w7bgd82"

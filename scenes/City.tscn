@@ -1,8 +1,9 @@
-[gd_scene load_steps=4 format=4 uid="uid://b25tddx3eacf2"]
+[gd_scene load_steps=5 format=4 uid="uid://b25tddx3eacf2"]
 
 [ext_resource type="PackedScene" uid="uid://cqxejvk3jwb6d" path="res://world/SceneTransitionArea.tscn" id="1_mn4j2"]
 [ext_resource type="TileSet" uid="uid://bhnh6wfkq5la" path="res://assets/Backgrounds/Tilesets/TileSet.tres" id="1_muise"]
 [ext_resource type="PackedScene" uid="uid://tw0hsqml6e1y" path="res://world/ResourceNode.tscn" id="2_hrcst"]
+[ext_resource type="PackedScene" uid="uid://b7bnnqfa26773" path="res://world/objects/Forge.tscn" id="2_xw602"]
 
 [node name="City" type="Node2D"]
 y_sort_enabled = true
@@ -20,6 +21,7 @@ tile_set = ExtResource("1_muise")
 [node name="Building" type="TileMapLayer" parent="TileMap"]
 light_mask = 8
 y_sort_enabled = true
+tile_map_data = PackedByteArray("AAAXAAQAAgAAAAAAAAA=")
 tile_set = ExtResource("1_muise")
 
 [node name="Props" type="TileMapLayer" parent="TileMap"]
@@ -27,19 +29,29 @@ light_mask = 16
 y_sort_enabled = true
 tile_set = ExtResource("1_muise")
 
+[node name="Objects" type="Node2D" parent="."]
+y_sort_enabled = true
+
+[node name="Forge" parent="Objects" instance=ExtResource("2_xw602")]
+y_sort_enabled = true
+position = Vector2(321, 78)
+
 [node name="Resources" type="Node2D" parent="."]
+y_sort_enabled = true
 
 [node name="Ashiron" parent="Resources" instance=ExtResource("2_hrcst")]
+y_sort_enabled = true
 position = Vector2(331, 132)
-yields_item_id = "resource_raw_ashiron_ore"
+yields_item_id = "resource_ore_ashiron"
 required_tool_type = 3
-respawn_delay_seconds = 5.0
+respawn_delay_seconds = 2.0
 
 [node name="Blazestone" parent="Resources" instance=ExtResource("2_hrcst")]
+y_sort_enabled = true
 position = Vector2(378, 132)
-yields_item_id = "resource_raw_blazestone_ore"
+yields_item_id = "resource_ore_blazestone"
 required_tool_type = 3
-respawn_delay_seconds = 5.0
+respawn_delay_seconds = 2.0
 
 [node name="CityEntrance" type="Marker2D" parent="."]
 position = Vector2(256, 30)

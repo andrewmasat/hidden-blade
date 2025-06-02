@@ -7,6 +7,7 @@
 [resource]
 script = ExtResource("1_rstis")
 item_id = "weapon_sword_2"
+display_name = "Sword"
 quantity = 1
 max_stack_size = 1
 texture = ExtResource("2_hy7hr")
@@ -14,4 +15,6 @@ item_type = 2
 heal_amount = 0
 equipped_texture = ExtResource("1_bayw5")
 damage = 5.0
+world_despawn_duration = 60.0
+crafting_ingredients = Array[Dictionary]([])
 metadata/_custom_type_script = "uid://cd5h74w7bgd82"

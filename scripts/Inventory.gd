@@ -10,7 +10,7 @@ signal cursor_item_changed(item_data: ItemData)
 
 # Constants
 const HOTBAR_SIZE = 9
-const INVENTORY_COLS = 8 # Example: 8 columns wide
+const INVENTORY_COLS = 9 # Example: 8 columns wide
 const INVENTORY_ROWS = 4 # Example: 4 rows high
 const INVENTORY_SIZE = INVENTORY_COLS * INVENTORY_ROWS
 
@@ -293,6 +293,86 @@ func get_selected_slot_index() -> int:
 
 func get_selected_item() -> ItemData: # Ensure ItemData type hint
 	return get_item_data(InventoryArea.HOTBAR, selected_slot_index)
+
+func get_item_quantity_by_id(item_id_to_find: String) -> int:
+	if item_id_to_find.is_empty():
+		return 0
+
+	var total_quantity: int = 0
+
+	# Check Hotbar
+	for item_data in hotbar_slots:
+		if item_data is ItemData and item_data.item_id == item_id_to_find:
+			total_quantity += item_data.quantity
+	
+	# Check Main Inventory
+	for item_data in inventory_slots:
+		if item_data is ItemData and item_data.item_id == item_id_to_find:
+			total_quantity += item_data.quantity
+			
+	return total_quantity
+
+func remove_item_by_id_and_quantity(item_id_to_remove: String, quantity_to_remove: int) -> bool:
+	if item_id_to_remove.is_empty() or quantity_to_remove <= 0:
+		return false # Invalid request
+
+	var quantity_actually_removed: int = 0
+	var target_quantity_to_remove = quantity_to_remove
+
+	# --- Pass 1: Decrease from Hotbar slots ---
+	for i in range(hotbar_slots.size()):
+		var item_data = hotbar_slots[i]
+		if item_data is ItemData and item_data.item_id == item_id_to_remove:
+			var amount_in_this_stack = item_data.quantity
+			var amount_to_take_from_stack = min(target_quantity_to_remove - quantity_actually_removed, amount_in_this_stack)
+			
+			if amount_to_take_from_stack > 0:
+				item_data.quantity -= amount_to_take_from_stack
+				quantity_actually_removed += amount_to_take_from_stack
+				
+				if item_data.quantity <= 0:
+					_set_item_data(InventoryArea.HOTBAR, i, null) # Remove item if stack depleted
+					_emit_change_signal(InventoryArea.HOTBAR, i, null)
+					# If this was the selected slot, ensure player unequips
+					if i == selected_slot_index:
+						emit_signal("selected_slot_changed", selected_slot_index, selected_slot_index, null)
+				else:
+					_emit_change_signal(InventoryArea.HOTBAR, i, item_data) # Update existing slot
+
+			if quantity_actually_removed >= target_quantity_to_remove:
+				return true # All required items removed
+
+	# --- Pass 2: Decrease from Main Inventory slots ---
+	for i in range(inventory_slots.size()):
+		var item_data = inventory_slots[i]
+		if item_data is ItemData and item_data.item_id == item_id_to_remove:
+			var amount_in_this_stack = item_data.quantity
+			var amount_to_take_from_stack = min(target_quantity_to_remove - quantity_actually_removed, amount_in_this_stack)
+
+			if amount_to_take_from_stack > 0:
+				item_data.quantity -= amount_to_take_from_stack
+				quantity_actually_removed += amount_to_take_from_stack
+
+				if item_data.quantity <= 0:
+					_set_item_data(InventoryArea.MAIN, i, null)
+					_emit_change_signal(InventoryArea.MAIN, i, null)
+				else:
+					_emit_change_signal(InventoryArea.MAIN, i, item_data)
+			
+			if quantity_actually_removed >= target_quantity_to_remove:
+				return true # All required items removed
+
+	if quantity_actually_removed < target_quantity_to_remove:
+		# This case means we couldn't find enough items.
+		# For robust transactional behavior, one might implement a rollback here,
+		# but for now, it means the operation failed to meet the full request.
+		# The items that *were* removed are still gone.
+		printerr("Inventory: Failed to remove full quantity of '", item_id_to_remove, "'. Requested: ", target_quantity_to_remove, ", Removed: ", quantity_actually_removed)
+		# Depending on game design, you might want to add back the `quantity_actually_removed` if partial removal is not allowed.
+		# For now, we'll assume partial removal up to what's available is okay if the pre-check failed.
+		return false 
+		
+	return true # Should have returned earlier if successful
 
 # Internal helper to get the correct array based on area
 func _get_slot_array(area: InventoryArea) -> Array:

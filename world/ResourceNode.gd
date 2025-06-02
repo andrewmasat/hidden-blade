@@ -77,13 +77,11 @@ func on_gather_interaction() -> Dictionary: # Returns a dictionary with item_id 
 
 func _deplete_node():
 	if not is_multiplayer_authority(): return # Server only
-	print("Node ", name, " depleted by server. Yielding: ", yields_item_id)
 	self.is_depleted = true # Setter on server starts respawn timer & syncs
 
 
 func _respawn_node():
 	if not is_multiplayer_authority(): return # Server only
-	print("Node ", name, " respawned by server.")
 	self.current_node_health = max_node_health # Server resets health
 	self.is_depleted = false # Server sets state, which syncs
 

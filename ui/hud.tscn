@@ -1,12 +1,13 @@
-[gd_scene load_steps=11 format=3 uid="uid://5jla8f64s8f"]
+[gd_scene load_steps=12 format=3 uid="uid://5jla8f64s8f"]
 
 [ext_resource type="Script" uid="uid://b56rv0tql5rd7" path="res://ui/Hud.gd" id="1_1v5rv"]
 [ext_resource type="Texture2D" uid="uid://cd7nrnoa5d2g4" path="res://assets/Ui/Receptacle/LifeBarMiniUnder.png" id="1_en2x2"]
 [ext_resource type="Texture2D" uid="uid://dlapvfa2ithyt" path="res://assets/Ui/Receptacle/LifeBarMiniProgress.png" id="2_1v5rv"]
 [ext_resource type="Script" uid="uid://chjmtiv3bk3v7" path="res://ui/UIContainer.gd" id="2_srpbi"]
 [ext_resource type="PackedScene" uid="uid://p5rcch5nsaa1" path="res://ui/inventory/InventorySlot.tscn" id="4_1v5rv"]
-[ext_resource type="Texture2D" uid="uid://d3ohffxbqnpdn" path="res://assets/Ui/Receptacle/Receptacle Sphere/Select.png" id="5_spcu4"]
+[ext_resource type="PackedScene" uid="uid://buqycysvn6fu" path="res://ui/crafting/CraftingMenu.tscn" id="4_qeiu7"]
 [ext_resource type="PackedScene" uid="uid://cc141b611ya43" path="res://ui/inventory/InventoryPanel.tscn" id="6_1v5rv"]
+[ext_resource type="Texture2D" uid="uid://br6ny702vondk" path="res://assets/Ui/Inventory/Inventory_select.png" id="6_mr7hm"]
 [ext_resource type="PackedScene" uid="uid://l1ltos0l2n54" path="res://ui/inventory/CursorItemDisplay.tscn" id="7_q43x7"]
 [ext_resource type="Texture2D" uid="uid://c70lsaaeo4g3b" path="res://assets/Ui/Input/Keyboard/KeyE.png" id="8_mr7hm"]
 [ext_resource type="Texture2D" uid="uid://coaf760ho47pk" path="res://assets/Ui/Input/Keyboard/KeyB.png" id="8_spcu4"]
@@ -25,9 +26,14 @@ mouse_filter = 2
 script = ExtResource("2_srpbi")
 
 [node name="InventoryPanel" parent="UIContainer" instance=ExtResource("6_1v5rv")]
+visible = false
 layout_mode = 1
 offset_top = -121.0
 offset_bottom = 121.0
+
+[node name="CraftingMenuInstance" parent="UIContainer" instance=ExtResource("4_qeiu7")]
+visible = false
+layout_mode = 1
 
 [node name="MarginContainer" type="MarginContainer" parent="UIContainer"]
 layout_mode = 1
@@ -79,7 +85,7 @@ layout_mode = 0
 offset_right = 40.0
 offset_bottom = 40.0
 mouse_filter = 2
-texture = ExtResource("5_spcu4")
+texture = ExtResource("6_mr7hm")
 stretch_mode = 5
 
 [node name="HotbarContainer" type="HBoxContainer" parent="UIContainer/MarginContainer/VBoxContainer/Hotbar"]
@@ -90,7 +96,7 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
-theme_override_constants/separation = 10
+theme_override_constants/separation = 0
 alignment = 1
 
 [node name="HotbarSlot0" parent="UIContainer/MarginContainer/VBoxContainer/Hotbar/HotbarContainer" instance=ExtResource("4_1v5rv")]

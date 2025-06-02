@@ -2,7 +2,6 @@
 extends Resource
 class_name ItemData
 
-# NEW Enum for Item Categories
 enum ItemType {
 	MISC,
 	CONSUMABLE,
@@ -14,6 +13,7 @@ enum ItemType {
 
 # --- Existing Properties ---
 @export var item_id: String = ""
+@export var display_name: String = ""
 @export var quantity: int = 1:
 	set(value): quantity = max(0, value)
 @export var max_stack_size: int = 1
@@ -32,6 +32,10 @@ enum ItemType {
 @export var placeable_scene: PackedScene
 @export_group("Behavior")
 @export var world_despawn_duration: float = 60.0
+@export_group("Crafting")
+## Array of dictionaries, e.g., [{"item_id": "wood_log", "quantity": 3}, {"item_id": "stone_chunk", "quantity": 1}]
+## If this array is empty, the item is not craftable via this recipe system.
+@export var crafting_ingredients: Array[Dictionary] = []
 
 # --- Helper Functions ---
 func is_stack_full() -> bool:
@@ -43,3 +47,8 @@ func can_add_to_stack(amount: int = 1) -> bool:
 # Helper to check if this item is equippable
 func is_equippable() -> bool:
 	return item_type == ItemType.WEAPON or item_type == ItemType.TOOL
+
+func get_effective_display_name() -> String:
+	if not display_name.is_empty():
+		return display_name
+	return item_id # Fallback to item_id if display_name is empty

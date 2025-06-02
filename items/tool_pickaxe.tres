@@ -7,6 +7,7 @@
 [resource]
 script = ExtResource("1_iv0un")
 item_id = "tool_pickaxe"
+display_name = "Pickaxe"
 quantity = 1
 max_stack_size = 1
 texture = ExtResource("2_rlwx4")
@@ -15,4 +16,5 @@ heal_amount = 0
 equipped_texture = ExtResource("1_6g58h")
 damage = 0.0
 world_despawn_duration = 60.0
+crafting_ingredients = Array[Dictionary]([])
 metadata/_custom_type_script = "uid://cd5h74w7bgd82"
