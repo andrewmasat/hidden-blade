@@ -374,6 +374,83 @@ func remove_item_by_id_and_quantity(item_id_to_remove: String, quantity_to_remov
 		
 	return true # Should have returned earlier if successful
 
+# Server calls this on the client's /root/Inventory node to tell it about a slot update.
+@rpc("any_peer", "call_local", "reliable") # Server (any_peer technically, but targeted by rpc_id) calls, client executes locally
+func client_receive_slot_update(area_enum_val: int, slot_index: int, item_data_resource_path: String, item_id_from_server: String, quantity_from_server: int):
+	# This function executes on the CLIENT that was targeted by the server's rpc_id.
+	# We need to ensure this client is actually the one who should be processing this.
+	# However, since the server uses rpc_id to target the specific client, this RPC
+	# will only arrive at the correct client's Inventory.gd instance.
+	# A check like 'if multiplayer.get_unique_id() != TARGETED_PEER_ID' is tricky here
+	# because the RPC itself doesn't carry who it was *intended* for beyond the rpc_id mechanism.
+	# We trust that rpc_id delivered it correctly.
+
+	print("Inventory (Client ", multiplayer.get_unique_id(), "): Received slot update from server. Area: ", area_enum_val, ", Slot: ", slot_index, ", Path: '", item_data_resource_path, "', ID: '", item_id_from_server, "', Qty: ", quantity_from_server)
+
+	var target_area = area_enum_val as InventoryArea # Cast int back to enum
+
+	var new_item_instance: ItemData = null
+	if not item_data_resource_path.is_empty(): # If server sent a resource path
+		var loaded_res = load(item_data_resource_path)
+		if loaded_res is ItemData:
+			new_item_instance = loaded_res.duplicate() # Client gets its own instance
+			new_item_instance.quantity = quantity_from_server
+			# Sanity check if item_id also matches, though path should be king
+			if new_item_instance.item_id != item_id_from_server and not item_id_from_server.is_empty():
+				printerr("Inventory (Client): Item ID mismatch for loaded resource! Path gave '", new_item_instance.item_id, "', server also sent ID '", item_id_from_server, "'. Using path's item.")
+		else:
+			printerr("Inventory (Client): Failed to load ItemData from path: ", item_data_resource_path)
+			# Fallback: Try to construct from item_id if path failed but id is valid
+			if not item_id_from_server.is_empty():
+				var base_res_by_id = ItemDatabase.get_item_base(item_id_from_server)
+				if base_res_by_id is ItemData:
+					new_item_instance = base_res_by_id.duplicate()
+					new_item_instance.quantity = quantity_from_server
+					print("  -> Fallback: Reconstructed item '", item_id_from_server, "' from ItemDatabase.")
+				else:
+					printerr("Inventory (Client): Fallback failed. Could not find item '", item_id_from_server, "' in ItemDatabase.")
+	elif not item_id_from_server.is_empty(): # No path, but got an ID (e.g., non-resource items, or if server prefers ID)
+		var base_res_by_id = ItemDatabase.get_item_base(item_id_from_server)
+		if base_res_by_id is ItemData:
+			new_item_instance = base_res_by_id.duplicate()
+			new_item_instance.quantity = quantity_from_server
+		else:
+			printerr("Inventory (Client): Could not find item '", item_id_from_server, "' in ItemDatabase.")
+	# If both path and ID are empty, new_item_instance remains null (empty slot)
+
+	# Update the local inventory array
+	var slots_array_ref = _get_slot_array(target_area) # Get local hotbar_slots or inventory_slots
+	if slot_index >= 0 and slot_index < slots_array_ref.size():
+		slots_array_ref[slot_index] = new_item_instance
+		print("  -> Client Inventory: Slot ", InventoryArea.keys()[target_area], "[", slot_index, "] updated locally.")
+		
+		# Emit the local signals so UI updates
+		_emit_change_signal(target_area, slot_index, new_item_instance)
+		
+		# If the hotbar's selected slot was updated, also emit selected_slot_changed
+		if target_area == InventoryArea.HOTBAR and slot_index == selected_slot_index:
+			emit_signal("selected_slot_changed", selected_slot_index, selected_slot_index, new_item_instance)
+	else:
+		printerr("Inventory (Client): Received invalid slot_index ", slot_index, " for area ", target_area)
+
+@rpc("any_peer", "call_local", "reliable") # Server calls this on client
+func client_receive_cursor_item_update(item_data_path: String, item_id_from_server: String, quantity_from_server: int):
+	print("Inventory (Client ", multiplayer.get_unique_id(), "): Received cursor update from server. Path: '", item_data_path, "', ID: '", item_id_from_server, "', Qty: ", quantity_from_server)
+
+	var new_cursor_item: ItemData = null
+	if not item_data_path.is_empty():
+		var res = load(item_data_path)
+		if res is ItemData:
+			new_cursor_item = res.duplicate()
+			new_cursor_item.quantity = quantity_from_server
+	elif not item_id_from_server.is_empty(): # Fallback to ID
+		var base_res = ItemDatabase.get_item_base(item_id_from_server)
+		if base_res is ItemData:
+			new_cursor_item = base_res.duplicate()
+			new_cursor_item.quantity = quantity_from_server
+			
+	set_cursor_item(new_cursor_item) # This existing function emits "cursor_item_changed" for UI
+
 # Internal helper to get the correct array based on area
 func _get_slot_array(area: InventoryArea) -> Array:
 	if area == InventoryArea.HOTBAR:
@@ -505,101 +582,47 @@ func clear_cursor_item() -> ItemData:
 	return old_item
 
 # --- Split Stack Logic ---
-# Called when a slot is right-clicked
-func split_stack_to_cursor(area: InventoryArea, index: int):
-	if cursor_item_data != null: # Cannot split if already holding
-		print("Inventory: Cannot split, already holding item on cursor.")
+func split_stack_to_cursor(source_area: InventoryArea, source_index: int):
+	if cursor_item_data != null: # Cannot split if client already holding
+		print("Inventory: Cannot split, client already holding item on cursor.")
 		return
 
-	var source_item: ItemData = get_item_data(area, index)
-	if source_item == null or source_item.quantity <= 1: # Check if splittable
-		print("Inventory: Cannot split empty slot or stack of 1.")
+	# Client needs to know what item is in the source slot to potentially show it on cursor optimistically
+	var source_item_locally = get_item_data(source_area, source_index)
+	if source_item_locally == null or source_item_locally.quantity <= 1:
+		print("Inventory: Cannot split empty slot or stack of 1 (client-side check).")
 		return
 
-	# ... (calculate quantities) ...
-	var quantity_to_move = ceil(float(source_item.quantity) / 2.0)
-	var quantity_remaining = source_item.quantity - quantity_to_move
-
-	# Decrease original stack quantity
-	source_item.quantity = quantity_remaining
-	print("  -> Source item qty reduced to:", quantity_remaining) # Debug
-
-	# Create NEW stack for cursor (duplic==ate!)
-	var new_cursor_stack: ItemData = source_item.duplicate()
-	new_cursor_stack.quantity = quantity_to_move
-	print("  -> New cursor stack created. Qty:", quantity_to_move) # Debug
-
-	# --- Put the new stack on the cursor ---
-	set_cursor_item(new_cursor_stack) # This emits cursor_item_changed
-	# Add extra print AFTER setting:
-	print("  -> Cursor item is now:", get_cursor_item()) # Debug verification
-
-	# Update the original slot's UI
-	_emit_change_signal(area, index, source_item)
-
-	var hud = get_tree().get_first_node_in_group("HUD")
-	if hud and hud.inventory_panel and hud.inventory_panel.grid_container:
-		hud.inventory_panel.grid_container.grab_focus()
-		print("  -> Attempted grab_focus on grid after split.") # Debug
+	print("Inventory (Client): Requesting server to split stack from ", InventoryArea.keys()[source_area], "[", source_index, "]")
+	var main_node = get_node_or_null("/root/Main")
+	if is_instance_valid(main_node):
+		main_node.rpc_id(1, "server_handle_split_stack_request", source_area, source_index)
+	else:
+		printerr("Inventory: Could not find Main node for split_stack RPC.")
 
 
 # --- Place Cursor Item Logic ---
-# Called when a slot is left-clicked while holding an item
 func place_cursor_item_on_slot(target_area: InventoryArea, target_index: int):
 	if cursor_item_data == null:
-		printerr("Inventory: place_cursor_item called with no item on cursor!")
+		printerr("Inventory: client_request_place_cursor_item called with no item on cursor!")
 		return
 
-	var target_item: ItemData = get_item_data(target_area, target_index)
+	print("Inventory (Client): Requesting server to place cursor item '", cursor_item_data.item_id, "' onto ", InventoryArea.keys()[target_area], "[", target_index, "]")
 
-	# Case 1: Target slot is empty
-	if target_item == null:
-		var item_placed = cursor_item_data # Hold reference before clearing cursor
-		if _set_item_data(target_area, target_index, item_placed): # Set data first
-			_emit_change_signal(target_area, target_index, item_placed) # THEN emit signal (triggers selection check if needed)
-			clear_cursor_item() # Cursor is now empty
-		else: printerr("Place Error: Failed to set target slot.")
+	# We need to send enough info for the server to reconstruct the cursor_item_data
+	# and know where it's going.
+	var item_id_on_cursor = cursor_item_data.item_id
+	var qty_on_cursor = cursor_item_data.quantity
+	var path_on_cursor = cursor_item_data.resource_path
 
-	# Case 2: Target slot has SAME item type (try merging)
-	elif target_item.item_id == cursor_item_data.item_id:
-		var can_add_to_target = target_item.max_stack_size - target_item.quantity
-		var amount_to_transfer = min(cursor_item_data.quantity, can_add_to_target)
-
-		if amount_to_transfer > 0:
-			target_item.quantity += amount_to_transfer
-			cursor_item_data.quantity -= amount_to_transfer
-			print("  -> Transferred ", amount_to_transfer)
-			_emit_change_signal(target_area, target_index, target_item) # Emit for target (triggers selection check if needed)
-
-			if cursor_item_data.quantity <= 0:
-				clear_cursor_item() # Clear cursor if fully merged
-			else:
-				emit_signal("cursor_item_changed", cursor_item_data) # Update cursor UI only
-		# else: # Target stack full, do nothing
-
-	# Case 3: Target slot has DIFFERENT item type (swap)
+	var main_node = get_node_or_null("/root/Main")
+	if is_instance_valid(main_node):
+		# Client tells server: "My cursor item (defined by these properties) wants to go to this target slot."
+		main_node.rpc_id(1, "server_handle_place_cursor_item_request", 
+						 path_on_cursor, item_id_on_cursor, qty_on_cursor, 
+						 target_area, target_index)
 	else:
-		print("Place Cursor: Target different. Swapping...")
-		var item_that_was_in_slot = target_item
-		var item_that_was_on_cursor = cursor_item_data
-		# IMPORTANT: Perform the swap using _set_item_data then emit signals AFTERWARDS
-		if _set_item_data(target_area, target_index, item_that_was_on_cursor): # Put cursor item in slot first
-			# Set cursor item BEFORE emitting slot signal, otherwise cur	sor state is wrong for listeners
-			set_cursor_item(item_that_was_in_slot) # Put slot item onto cursor (emits cursor changed)
-			# NOW emit signal for the slot change
-			_emit_change_signal(target_area, target_index, item_that_was_on_cursor) # Triggers selection check if needed
-		else: printerr("Swap Error: Failed setting target slot.")
-		
-	var was_dragging_selected = is_dragging_selected_slot # Store before resetting
-	if is_dragging_selected_slot:
-		print("Inventory: Resetting is_dragging_selected_slot flag after placement.") # DEBUG
-		is_dragging_selected_slot = false
-
-	# If we WERE dragging the selected slot, we need to ensure the player
-	# gets the FINAL state of that slot now that the drag is over.
-	if was_dragging_selected:
-		print("  -> Forcing selection update check after drag end.") # DEBUG
-		force_update_selected_slot_signal()
+		printerr("Inventory: Could not find Main node for place_cursor_item RPC.")
 
 func force_update_selected_slot_signal():
 	# Re-emit the signal with the current state

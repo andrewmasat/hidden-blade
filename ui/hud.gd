@@ -206,19 +206,39 @@ func _update_selection_indicator(index: int):
 	else:
 		selection_indicator.visible = false
 
-func assign_player_and_connect_signals(player_node: CharacterBody2D):
-	if not is_instance_valid(player_node):
-		printerr("HUD Error: Invalid player node assigned.")
+func assign_player_and_connect_signals(p_player_node: Player):
+	if not is_instance_valid(p_player_node):
+		printerr("HUD: assign_player_and_connect_signals called with invalid player_node.")
 		return
-
-	# self.player_node_ref = player_node # Store if needed for other HUD functions
-	print("HUD: Player assigned. Connecting signals.") # Debug
+	
+	print("HUD: assign_player_and_connect_signals CALLED with player: ", p_player_node)
 
 	# Connect signals (These need to be defined in Player.gd!)
-	if player_node.has_signal("health_changed"):
-		player_node.health_changed.connect(_on_player_health_changed)
+	if p_player_node.has_signal("health_changed"):
+		p_player_node.health_changed.connect(_on_player_health_changed)
 	# else: printerr("HUD: Player missing expected signals.")
 
 	# Update HUD with initial player values (Requires getter methods in Player.gd)
-	if player_node.has_method("get_current_health") and player_node.has_method("get_max_health"):
-		_on_player_health_changed(player_node.get_current_health(), player_node.get_max_health())
+	if p_player_node.has_method("get_current_health") and p_player_node.has_method("get_max_health"):
+		_on_player_health_changed(p_player_node.get_current_health(), p_player_node.get_max_health())
+	
+	# --- Connection for Crafting Result ---
+	if is_instance_valid(p_player_node) and is_instance_valid(crafting_menu_instance): # Ensure both nodes exist
+		if p_player_node.has_signal("crafting_attempt_completed"):
+			if crafting_menu_instance.has_method("handle_server_crafting_result"):
+				# Check if already connected to prevent duplicate connections if this func is called multiple times
+				if not p_player_node.is_connected("crafting_attempt_completed", Callable(crafting_menu_instance, "handle_server_crafting_result")):
+					var err = p_player_node.crafting_attempt_completed.connect(crafting_menu_instance.handle_server_crafting_result)
+					if err == OK:
+						print("HUD: SUCCESSFULLY Connected Player.crafting_attempt_completed to CraftingMenu.handle_server_crafting_result")
+					else:
+						printerr("HUD: FAILED to connect Player.crafting_attempt_completed. Error: ", err)
+				else:
+					print("HUD: Crafting signal already connected.")
+			else:
+				printerr("HUD Error: CraftingMenuInstance '", crafting_menu_instance.name, "' is missing 'handle_server_crafting_result' method.")
+		else:
+			printerr("HUD Error: PlayerNode '", p_player_node.name, "' is missing 'crafting_attempt_completed' signal.")
+	else:
+		if not is_instance_valid(p_player_node): printerr("HUD Error: PlayerNode is invalid for crafting signal connection.")
+		if not is_instance_valid(crafting_menu_instance): printerr("HUD Error: CraftingMenuInstance is invalid for crafting signal connection.")

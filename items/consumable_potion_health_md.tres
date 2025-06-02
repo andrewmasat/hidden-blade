@@ -5,7 +5,7 @@
 
 [resource]
 script = ExtResource("1_otgnp")
-item_id = "consumable_potion_health_xl"
+item_id = "consumable_potion_health_md"
 display_name = "Health Potion"
 quantity = 1
 max_stack_size = 10

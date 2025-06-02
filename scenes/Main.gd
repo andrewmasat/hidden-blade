@@ -312,6 +312,8 @@ func _setup_local_player_references(player_node_name_is_peer_id_str: String) -> 
 		print("Main: Local player node '", local_player_node.name, "' reference SET for SceneManager.")
 		SceneManager.player_node = local_player_node
 
+		if is_instance_valid(hud) and hud.has_method("assign_player_and_connect_signals"):
+			hud.assign_player_and_connect_signals(local_player_node)
 		if local_player_node.has_method("end_scene_transition"):
 			local_player_node.call_deferred("end_scene_transition")
 	else:
@@ -373,6 +375,83 @@ func _custom_dropped_item_spawn_function(data: Dictionary) -> Node:
 
 	print("CustomDroppedItemSpawn (Peer:", multiplayer.get_unique_id(), "): DroppedItem instance created for '", unique_id_for_instance, "'")
 	return dropped_item
+
+
+@rpc("any_peer", "call_local", "reliable")
+func server_handle_debug_add_item_to_inventory(item_id_to_add: String, quantity: int):
+	if not multiplayer.is_server(): return
+
+	var requesting_peer_id = multiplayer.get_remote_sender_id()
+	if requesting_peer_id == 0 and multiplayer.get_unique_id() == 1: requesting_peer_id = 1
+	
+	print("Main (Server): Received debug_add_item request from peer [", requesting_peer_id, "] for item '", item_id_to_add, "' qty ", quantity)
+
+	var item_base_res = ItemDatabase.get_item_base(item_id_to_add)
+	if not is_instance_valid(item_base_res):
+		printerr("  -> Server: Debug item '", item_id_to_add, "' not found in ItemDatabase.")
+		# Optionally RPC failure back to client's player
+		return
+
+	var item_instance_for_server = item_base_res.duplicate()
+	item_instance_for_server.quantity = quantity
+
+	if ServerInventoryManager.add_item_to_player_inventory(requesting_peer_id, item_instance_for_server):
+		print("  -> Server: Debug item '", item_id_to_add, "' added to ServerInventoryManager for peer [", requesting_peer_id, "]")
+		# ServerInventoryManager will call _notify_client_of_slot_update, which RPCs client Inventory.gd
+	else:
+		printerr("  -> Server: FAILED to add debug item '", item_id_to_add, "' to ServerInventoryManager for peer [", requesting_peer_id, "] (Inventory full?).")
+		# Optionally RPC failure back to client's player
+
+
+@rpc("any_peer", "call_local", "reliable")
+func server_handle_place_cursor_item_request(cursor_item_path: String, cursor_item_id: String, cursor_item_qty: int, 
+										  target_area_enum_val: int, target_index: int):
+	if not multiplayer.is_server(): return
+	var requesting_peer_id = multiplayer.get_remote_sender_id()
+	if requesting_peer_id == 0 and multiplayer.get_unique_id() == 1: requesting_peer_id = 1
+	
+	print("Main (Server): Peer [", requesting_peer_id, "] requests to place cursor item (ID '", cursor_item_id, "', Qty ", cursor_item_qty, ") onto Area ", target_area_enum_val, " Slot ", target_index)
+
+	# Reconstruct the ItemData for the cursor item on server
+	var cursor_item_on_server: ItemData = null
+	if not cursor_item_path.is_empty():
+		var res = load(cursor_item_path)
+		if res is ItemData:
+			cursor_item_on_server = res.duplicate()
+			cursor_item_on_server.quantity = cursor_item_qty
+	elif not cursor_item_id.is_empty(): # Fallback to ID
+		var base_res = ItemDatabase.get_item_base(cursor_item_id)
+		if base_res is ItemData:
+			cursor_item_on_server = base_res.duplicate()
+			cursor_item_on_server.quantity = cursor_item_qty
+			
+	if not is_instance_valid(cursor_item_on_server):
+		printerr("  -> Server: Could not reconstruct cursor item '", cursor_item_id, "'. Aborting place request.")
+		# TODO: RPC failure to client
+		return
+
+	var target_area = target_area_enum_val as Inventory.InventoryArea
+	
+	# Call a new method in ServerInventoryManager
+	if ServerInventoryManager.has_method("place_item_onto_slot_from_cursor_like_source"):
+		ServerInventoryManager.place_item_onto_slot_from_cursor_like_source(requesting_peer_id, cursor_item_on_server, target_area, target_index)
+	else:
+		printerr("  -> Server: ServerInventoryManager missing 'place_item_onto_slot_from_cursor_like_source' method.")
+
+
+@rpc("any_peer", "call_local", "reliable")
+func server_handle_split_stack_request(source_area_enum_val: int, source_index: int):
+	if not multiplayer.is_server(): return
+	var requesting_peer_id = multiplayer.get_remote_sender_id()
+	if requesting_peer_id == 0 and multiplayer.get_unique_id() == 1: requesting_peer_id = 1
+
+	var source_area = source_area_enum_val as Inventory.InventoryArea
+	print("Main (Server): Peer [", requesting_peer_id, "] requests to split stack from Area ", source_area, " Slot ", source_index)
+
+	if ServerInventoryManager.has_method("split_player_stack_to_cursor_like_destination"):
+		ServerInventoryManager.split_player_stack_to_cursor_like_destination(requesting_peer_id, source_area, source_index)
+	else:
+		printerr("  -> Server: ServerInventoryManager missing 'split_player_stack_to_cursor_like_destination' method.")
 
 
 @rpc("any_peer", "call_local", "reliable") # Client (any_peer) calls this, server (ID 1) executes it locally
@@ -458,20 +537,103 @@ func server_process_gather_request(node_path_from_level: NodePath):
 
 	# 5. If items were yielded, send them to the specific client
 	if yielded_item_info.has("item_id") and yielded_item_info.has("quantity"):
-		var item_id_to_send = yielded_item_info.get("item_id")
-		var quantity_to_send = yielded_item_info.get("quantity")
+		var item_id_to_give = yielded_item_info.get("item_id")
+		var quantity_to_give = yielded_item_info.get("quantity")
+		
+		print("  -> Server: Node yielded ", quantity_to_give, "x ", item_id_to_give, ". For peer [", requesting_peer_id, "]")
 
-		if requesting_peer_id == multiplayer.get_unique_id(): # If the server is processing for itself (host)
-			print("  -> Server (Host) is processing for self. Calling client_receive_gathered_items directly on its Player node.")
-			requesting_player_node_on_server.client_receive_gathered_items(item_id_to_send, quantity_to_send) # Direct call
+		# --- THIS IS THE NEW CORE LOGIC ---
+		# Add item to the ServerInventoryManager for the requesting_peer_id
+		var item_base_res = ItemDatabase.get_item_base(item_id_to_give)
+		if is_instance_valid(item_base_res):
+			var item_instance_for_server_inv = item_base_res.duplicate()
+			item_instance_for_server_inv.quantity = quantity_to_give
+			
+			if ServerInventoryManager.add_item_to_player_inventory(requesting_peer_id, item_instance_for_server_inv):
+				print("    -> Item added to ServerInventoryManager for peer [", requesting_peer_id, "]")
+				# ServerInventoryManager.add_item_to_player_inventory will internally call
+				# _notify_client_of_slot_update, which sends the RPC to the client's (or host's client-side) Inventory.gd.
+				# So, the client_receive_gathered_items RPC on Player.gd is no longer strictly needed for inventory update.
+				# It can be used for other feedback like sounds or messages if desired.
+			else:
+				printerr("    -> FAILED to add item to ServerInventoryManager for peer [", requesting_peer_id, "] (Inventory full on server?). Item might be lost.")
+				# TODO: Handle item dropping on ground if server inventory is full.
 		else:
-			# For a remote client, RPC to that specific client's peer_id,
-			# telling it to execute on its instance of the player node.
-			print("  -> Server: Sending RPC client_receive_gathered_items to remote PEER [", requesting_peer_id, "] for their PlayerNode '", requesting_player_node_on_server.name, "'")
-			requesting_player_node_on_server.rpc_id(requesting_peer_id, "client_receive_gathered_items", item_id_to_send, quantity_to_send)
+			printerr("    -> Server Error: Could not find ItemData for '", item_id_to_give, "' in ItemDatabase. Cannot give to player.")
+
+
+@rpc("any_peer", "call_local", "reliable") # Client (any_peer) calls this, server (ID 1) executes it locally
+func server_handle_craft_item_request(item_id_to_craft: String):
+	if not multiplayer.is_server(): # Guard: Ensure this only runs on the server
+		return
+
+	var requesting_peer_id = multiplayer.get_remote_sender_id()
+	# If the host calls this on itself locally (e.g. via a UI that uses the same RPC path),
+	# get_remote_sender_id() will be 0. We need to correctly identify the host as peer 1.
+	if requesting_peer_id == 0 and multiplayer.get_unique_id() == 1:
+		requesting_peer_id = 1 
+	
+	if requesting_peer_id == 0: # Still 0 means it's an invalid sender for this context
+		printerr("Main (Server): server_handle_craft_item_request from invalid sender_id 0 after check.")
+		return
+
+	print("Main (Server): Received craft item request from peer [", requesting_peer_id, "] for item '", item_id_to_craft, "'")
+
+	# Find the parent node where player instances are actually spawned
+	var actual_player_parent_node: Node
+	if not is_instance_valid(player_spawner): # Ensure player_spawner is valid
+		printerr("  -> Main (Server) Error: player_spawner node reference is invalid!")
+		# TODO: Notify client of failure if possible (e.g., by finding their player node by peer_id if it exists elsewhere and RPCing a fail message)
+		return
+
+	if player_spawner.spawn_path.is_empty() or player_spawner.spawn_path == NodePath("."):
+		actual_player_parent_node = player_spawner
 	else:
-		print("  -> Server: Node '", resource_node.name, "' was hit, but no items yielded this time (or became depleted by this hit). State will be synced.")
-		# The MultiplayerSynchronizer on ResourceNode will handle syncing its depleted state.
+		actual_player_parent_node = player_spawner.get_node_or_null(player_spawner.spawn_path)
+
+	if not is_instance_valid(actual_player_parent_node):
+		printerr("  -> Main (Server) Error: Could not find actual player parent node based on PlayerSpawner's spawn_path: '", player_spawner.spawn_path, "'")
+		# TODO: Notify client of failure
+		return
+	
+	# Find the specific Player node instance on the server that corresponds to the requesting client
+	var requesting_player_node_on_server = actual_player_parent_node.get_node_or_null(str(requesting_peer_id)) as Player
+	if not is_instance_valid(requesting_player_node_on_server):
+		printerr("  -> Main (Server) Error: Could not find player node '", str(requesting_peer_id), "' under '", actual_player_parent_node.name, "' on server for crafting. Children are: ", actual_player_parent_node.get_children())
+		# If you can get the player node by another means to send a failure RPC, do so.
+		# Otherwise, the client might time out or not know why crafting isn't happening.
+		# For now, we can't RPC back without a player node reference.
+		return
+
+	# Call the (non-RPC) processing function on that specific Player node instance on the server
+	if requesting_player_node_on_server.has_method("process_server_craft_attempt"):
+		requesting_player_node_on_server.process_server_craft_attempt(item_id_to_craft)
+	else:
+		printerr("  -> Main (Server) Error: Player node '", str(requesting_peer_id), "' missing 'process_server_craft_attempt' method.")
+		# If possible, RPC a failure message back to the client via requesting_player_node_on_server.client_crafting_result.rpc(false, item_id_to_craft, "Internal server error: method missing")
+		if requesting_player_node_on_server.has_method("client_crafting_result"): # Check before calling
+			requesting_player_node_on_server.client_crafting_result(false, item_id_to_craft, "Internal server error: Craft processing method missing.")
+
+@rpc("any_peer", "call_local", "reliable")
+func server_handle_slot_emptied_for_drag(source_area_enum_val: int, source_index: int):
+	if not multiplayer.is_server(): return
+	var requesting_peer_id = multiplayer.get_remote_sender_id()
+	if requesting_peer_id == 0 and multiplayer.get_unique_id() == 1: requesting_peer_id = 1
+	
+	var source_area = source_area_enum_val as Inventory.InventoryArea
+	print("Main (Server): Peer [", requesting_peer_id, "] notified slot ", Inventory.InventoryArea.keys()[source_area], "[", source_index, "] was emptied for drag.")
+
+	# Tell ServerInventoryManager to update this slot to null for this player
+	# This will also trigger _notify_client_of_slot_update to confirm with the client.
+	if ServerInventoryManager.has_method("_set_player_slot_item_authoritative"): # Let's assume a direct setter for this
+		ServerInventoryManager._set_player_slot_item_authoritative(requesting_peer_id, source_area, source_index, null)
+	else: # Fallback to a more generic remove if needed, or add the method
+		# For now, let's ensure SIM has a way to just set a slot to null.
+		# The existing _set_player_slot_item in SIM will do this and notify client.
+		var current_item_in_slot_on_server = ServerInventoryManager.get_player_inventory_area_slots(requesting_peer_id, source_area)[source_index]
+		if is_instance_valid(current_item_in_slot_on_server): # Only update if server thought something was there
+			ServerInventoryManager._set_player_slot_item(requesting_peer_id, source_area, source_index, null)
+
 
 # --- Pause/Resume Logic ---
 func pause_game() -> void:

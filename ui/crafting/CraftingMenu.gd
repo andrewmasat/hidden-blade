@@ -5,11 +5,18 @@ const RecipeEntryScene = preload("res://ui/crafting/RecipeEntry.tscn") # Adjust 
 
 @onready var recipe_list_container = $PanelContainer/MarginContainer/VBoxContainer/HBoxContainer/ScrollContainer/RecipeListContainer
 @onready var selected_recipe_info_label = $PanelContainer/MarginContainer/VBoxContainer/HBoxContainer/VBoxContainer/SelectedRecipeInfoLabel
+@onready var crafting_progress_bar = $PanelContainer/MarginContainer/VBoxContainer/HBoxContainer/VBoxContainer/CraftingProgressBar
+@onready var crafting_status_label = $PanelContainer/MarginContainer/VBoxContainer/HBoxContainer/VBoxContainer/CraftingStatusLabel
 @onready var craft_button = $PanelContainer/MarginContainer/VBoxContainer/HBoxContainer/VBoxContainer/CraftButton
 
 var all_craftable_items: Array[ItemData] = []
 var currently_selected_recipe_item: ItemData = null
 var recipe_entry_button_group: ButtonGroup = ButtonGroup.new()
+
+var _is_currently_crafting: bool = false
+var _crafting_timer: Timer = Timer.new()
+var _current_craft_item_id: String = ""
+var _current_craft_duration: float = 0.0
 
 func _ready():
 	Inventory.inventory_changed.connect(_on_player_inventory_changed)
@@ -20,7 +27,20 @@ func _ready():
 	selected_recipe_info_label.text = "Select a recipe."
 	# Hide the menu initially; Player/HUD will show it.
 	visible = false 
+	crafting_progress_bar.visible = false
+	if is_instance_valid(crafting_status_label): crafting_status_label.visible = false
+
+	_crafting_timer.one_shot = true
+	_crafting_timer.timeout.connect(_on_local_crafting_timer_timeout) # We'll define this
+	add_child(_crafting_timer)
+
 	_populate_recipe_list()
+
+func _process(delta):
+	if _is_currently_crafting and is_instance_valid(crafting_progress_bar) and _crafting_timer.time_left > 0:
+		crafting_progress_bar.value = (1.0 - (_crafting_timer.time_left / _current_craft_duration)) * 100.0
+	elif _is_currently_crafting and crafting_progress_bar.value != 100 and _crafting_timer.time_left == 0: # Ensure it hits 100 if timer just finished
+		crafting_progress_bar.value = 100
 
 func open_menu():
 	# Potentially refresh list if new recipes could be learned
@@ -30,8 +50,12 @@ func open_menu():
 	# TODO: Handle input focus, maybe select first recipe if list not empty
 
 func close_menu():
+	if _is_currently_crafting:
+		print("CraftingMenu: Closing menu, cancelling active client-side craft for ", _current_craft_item_id)
+		# No need to inform server if we haven't sent the request yet.
+		_reset_crafting_state()
 	visible = false
-	# TODO: Return input focus to game
+	# TODO: Return input focus to game (from HUD's close_crafting_menu)
 
 func _populate_recipe_list():
 	# Clear existing entries
@@ -70,6 +94,38 @@ func _populate_recipe_list():
 
 		recipe_entry.button_group = recipe_entry_button_group
 		recipe_entry.pressed.connect(_on_recipe_entry_selected.bind(item_data))
+
+
+func handle_server_crafting_result(was_successful: bool, p_crafted_item_id: String, _message: String):
+	print("CraftingMenu [", name, "] handle_server_crafting_result TRIGGERED. Success: ", was_successful, " Item: ", p_crafted_item_id)
+	if _is_currently_crafting and p_crafted_item_id == _current_craft_item_id:
+		# This was the craft we were waiting for
+		if was_successful:
+			# Server already handled inventory changes and sent RPCs to client Inventory.gd
+			# Client Inventory.gd emitted signals, so UI should update.
+			# TODO: Play crafting success sound
+			print("  -> CraftingMenu: Craft successful on server for ", p_crafted_item_id)
+		else:
+			# TODO: Play crafting failed sound, show specific error message from server to user
+			print("  -> CraftingMenu: Craft FAILED on server for ", p_crafted_item_id, ". Reason: ", _message)
+		
+		_reset_crafting_state() # Always reset after server response
+		_refresh_all_recipe_entry_counts() # Refresh counts as inventory has changed
+		_update_craft_button_state() # Update button for current selection
+		
+		# If a recipe was selected, re-display its info as ingredient counts changed
+		if is_instance_valid(currently_selected_recipe_item):
+			_on_recipe_entry_selected(currently_selected_recipe_item)
+
+	elif not _is_currently_crafting and was_successful:
+		# This might be for an "instant" craft that didn't use the timer,
+		# or a craft result came in after player closed menu / cancelled.
+		print("  -> CraftingMenu: Received craft success for '", p_crafted_item_id,"' but not actively crafting it locally or already reset. Inventory should be updated by server.")
+		_refresh_all_recipe_entry_counts() # Still refresh counts
+		_update_craft_button_state()
+	elif not _is_currently_crafting and not was_successful:
+		print("  -> CraftingMenu: Received craft failure for '", p_crafted_item_id,"' but not actively crafting it locally. Reason: ", _message)
+		# Potentially show a global notification if important.
 
 
 func _on_recipe_entry_selected(selected_item_data: ItemData):
@@ -133,19 +189,116 @@ func _update_craft_button_state():
 	craft_button.disabled = not can_craft
 
 
-func _on_craft_button_pressed():
-	if currently_selected_recipe_item != null:
-		print("Attempting to craft: ", currently_selected_recipe_item.item_id)
-		# This will be Task 2.3: Implement crafting logic (consume items, give crafted item)
-		# For now, just a print. We'll call an Inventory or CraftingManager function here.
-		var success = _perform_crafting(currently_selected_recipe_item)
-		if success:
-			print("Crafted successfully!")
-			_on_recipe_entry_selected(currently_selected_recipe_item)
-			_refresh_all_recipe_entry_counts()
-		else:
-			print("Crafting failed (not enough ingredients - should be caught by button state).")
+func _on_local_crafting_timer_timeout():
+	if not _is_currently_crafting: return
 
+	print("CraftingMenu: Local crafting timer finished for ", _current_craft_item_id)
+	crafting_progress_bar.value = 100
+	
+	if is_instance_valid(crafting_status_label):
+		var item_being_crafted_data = ItemDatabase.get_item_base(_current_craft_item_id)
+		var item_name_for_status = _current_craft_item_id # Fallback
+		if is_instance_valid(item_being_crafted_data):
+			item_name_for_status = _get_item_display_name(item_being_crafted_data)
+			
+		crafting_status_label.text = "Finishing: " + item_name_for_status # Corrected
+		
+	_send_craft_request_to_server(_current_craft_item_id)
+
+
+func _send_craft_request_to_server(item_id_to_craft: String):
+	var main_node = get_tree().get_root().get_node_or_null("/root/Main")
+	if is_instance_valid(main_node):
+		print("  -> CraftingMenu: Sending craft request RPC to Main on server for item: ", item_id_to_craft)
+		main_node.rpc_id(1, "server_handle_craft_item_request", item_id_to_craft)
+	else:
+		printerr("CraftingMenu: Could not find Main node to send craft RPC.")
+		_reset_crafting_state() # Reset if we can't even send the request
+
+
+func _reset_crafting_state():
+	_is_currently_crafting = false
+	_crafting_timer.stop()
+	_current_craft_item_id = ""
+	_current_craft_duration = 0.0
+	if is_instance_valid(crafting_progress_bar): crafting_progress_bar.visible = false
+	if is_instance_valid(crafting_status_label): crafting_status_label.visible = false
+	
+	# Re-enable recipe selection
+	if is_instance_valid(recipe_list_container):
+		for child_node in recipe_list_container.get_children():
+			if child_node is Button:
+				var recipe_button = child_node as Button
+				recipe_button.disabled = false
+
+	_update_craft_button_state() # Re-evaluate craft button (might be craftable again or not)
+	print("CraftingMenu: Crafting state reset.")
+
+
+func _on_craft_button_pressed():
+	if _is_currently_crafting: # Don't allow starting a new craft if one is in progress
+		print("Crafting already in progress for: ", _current_craft_item_id)
+		return
+
+	if currently_selected_recipe_item != null:
+		# Client-side check for ingredients (still good for immediate feedback)
+		var can_craft_locally = true
+		for ingredient_dict in currently_selected_recipe_item.crafting_ingredients:
+			var req_item_id = ingredient_dict.get("item_id")
+			var req_qty = ingredient_dict.get("quantity")
+			if Inventory.get_item_quantity_by_id(req_item_id) < req_qty:
+				can_craft_locally = false
+				break
+		
+		if not can_craft_locally:
+			print("CraftingMenu: Cannot start craft, client-side check indicates missing ingredients for ", currently_selected_recipe_item.item_id)
+			# Optionally show a message to the user
+			_update_craft_button_state() # Refresh button state just in case
+			return
+
+		# --- Start Timed Craft ---
+		_current_craft_item_id = currently_selected_recipe_item.item_id
+		_current_craft_duration = currently_selected_recipe_item.crafting_time_seconds
+		
+		print("CraftingMenu: Starting to craft: ", _current_craft_item_id, " (Duration: ", _current_craft_duration, "s)")
+
+		if _current_craft_duration > 0.01: # Only show progress bar for non-instant crafts
+			_is_currently_crafting = true
+			craft_button.disabled = true # Disable while crafting
+
+			# Disable recipe selection by disabling each recipe entry button
+			for child_node in recipe_list_container.get_children():
+				if child_node is Button: # Assuming RecipeEntry is a Button or extends Button
+					var recipe_button = child_node as Button
+					recipe_button.disabled = true
+
+			crafting_progress_bar.value = 0
+			crafting_progress_bar.visible = true
+			if is_instance_valid(crafting_status_label):
+				# Ensure currently_selected_recipe_item is valid before getting its name
+				var item_name_for_status = "Item"
+				if is_instance_valid(currently_selected_recipe_item):
+					item_name_for_status = _get_item_display_name(currently_selected_recipe_item)
+
+				crafting_status_label.text = "Crafting: " + item_name_for_status
+				crafting_status_label.visible = true
+
+			_crafting_timer.start(_current_craft_duration)
+			# TODO: Play crafting start sound/animation
+		else: # Instant craft
+			_send_craft_request_to_server(_current_craft_item_id)
+			# For instant crafts, the UI might briefly flash or we might rely on server RPC for feedback
+			# Resetting immediately might be too fast. Server response will dictate UI update.
+
+
+func _get_item_display_name(item_data: ItemData) -> String:
+	if not is_instance_valid(item_data): return "Unknown Item" # Return a default string
+	var display_name = item_data.item_id # Fallback
+	if item_data.has_method("get_effective_display_name"):
+		display_name = item_data.get_effective_display_name()
+	elif item_data.has("display_name") and not item_data.display_name.is_empty():
+		display_name = item_data.display_name
+	return display_name if not display_name.is_empty() else "Unnamed Item" # Ensure non-empty
 
 # Placeholder for actual crafting logic (Task 2.3)
 func _perform_crafting(item_to_craft: ItemData) -> bool:

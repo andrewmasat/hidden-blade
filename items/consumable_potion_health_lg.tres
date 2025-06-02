@@ -5,7 +5,7 @@
 
 [resource]
 script = ExtResource("1_2axkq")
-item_id = "consumable_potion_health_sm"
+item_id = "consumable_potion_health_lg"
 display_name = "Large Health Potion"
 quantity = 1
 max_stack_size = 10

@@ -177,9 +177,11 @@ func _get_drag_data(_at_position: Vector2):
 			printerr("Slot [", slot_index, "] _get_drag_data: Failed to move item to cursor.")
 			return null
 
-		# Return minimal data just to initiate the drag state.
-		# The actual item state is now managed via the cursor.
-		# Rely on CursorItemDisplay for visual feedback during drag.
+		var main_node = get_node_or_null("/root/Main")
+		if is_instance_valid(main_node):
+			print("  -> Client notifying server: slot ", inventory_area, "[",slot_index,"] emptied for drag.")
+			main_node.rpc_id(1, "server_handle_slot_emptied_for_drag", inventory_area, slot_index)
+
 		return { "drag_type": "inventory_item_on_cursor" }
 	else:
 		# Cannot drag an empty slot.

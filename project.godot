@@ -21,6 +21,7 @@ SceneManager="*res://scripts/SceneManager.gd"
 ItemDatabase="*res://scripts/ItemDatabase.gd"
 Inventory="*res://scripts/Inventory.gd"
 NetworkManager="*res://scripts/NetworkManager.gd"
+ServerInventoryManager="*res://scripts/ServerInventoryManager.gd"
 
 [display]
 

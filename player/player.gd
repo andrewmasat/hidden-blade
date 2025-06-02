@@ -6,8 +6,10 @@ const DebugItemResource = preload("res://items/tool_pickaxe.tres")
 const DroppedItemScene = preload("res://world/DroppedItem.tscn")
 
 # Signals for HUD
+signal local_player_is_ready(player_instance)
 signal health_changed(current_health: float, max_health: float)
 signal dash_charges_changed(current_charges: int, max_charges: int)
+signal crafting_attempt_completed(was_successful: bool, crafted_item_id: String, message: String)
 
 enum State { IDLE_RUN, DASH, ATTACK, TRANSITIONING }
 
@@ -104,6 +106,9 @@ func _ready():
 	current_state = State.IDLE_RUN
 
 	_equip_item(Inventory.get_selected_item())
+	if is_multiplayer_authority():
+		emit_signal("local_player_is_ready", self)
+
 
 
 # --- Main Loop ---
@@ -167,16 +172,17 @@ func _physics_process(delta: float):
 			if Input.is_action_just_pressed("debug_damage"): take_damage(10)
 			if Input.is_action_just_pressed("debug_heal"): heal(10)
 			if Input.is_action_just_pressed("debug_add_item"):
-				if DebugItemResource:
-					# Important: DUPLICATE the resource so each add gets a unique instance
-					# Otherwise changing quantity of one stack changes all!
-					var new_item_instance = DebugItemResource.duplicate()
-					# Set initial quantity if needed (or handle in add_item)
-					new_item_instance.quantity = 1
-					var success = Inventory.add_item(new_item_instance)
-					if not success: print("Could not add debug item (inventory full?)")
-				else:
-					printerr("Debug item resource not loaded!")
+				if is_multiplayer_authority(): # Only the local player should send this for themselves
+					var item_id_to_spawn = DebugItemResource.item_id # Assuming DebugItemResource is your tool's ItemData
+					var quantity_to_spawn = 1 
+					
+					# RPC to Main.gd on server
+					var main_node = get_node_or_null("/root/Main")
+					if is_instance_valid(main_node):
+						print("Player [", name, "]: Requesting server to spawn debug item '", item_id_to_spawn, "'")
+						main_node.rpc_id(1, "server_handle_debug_add_item_to_inventory", item_id_to_spawn, quantity_to_spawn)
+					else:
+						printerr("Player [", name, "]: Could not find Main node for debug item spawn RPC.")
 		State.DASH:
 			process_dash_state(delta)
 		State.ATTACK:
@@ -204,6 +210,7 @@ func set_player_name(new_name: String):
 	# Update nameplate if node is ready
 	if is_node_ready(): # Check if the Player node itself is ready
 		_update_nameplate_if_ready()
+
 
 @rpc("authority", "call_local", "reliable") # Only the authority (client for its own player) executes this
 func set_initial_network_position(pos: Vector2):
@@ -463,98 +470,35 @@ func server_request_pickup_item_by_id(item_unique_id_to_pickup: String):
 			break
 
 	if not is_instance_valid(item_node_to_pickup):
-		printerr("ServerPickup: Item with unique_id '", item_unique_id_to_pickup, "' not found.")
+		printerr("ServerPickup: Item with unique_id '", item_unique_id_to_pickup, "' not found for peer ", requesting_peer_id)
+		# TODO: RPC failure to client
+		return
+	
+	var item_data_to_give_player = item_node_to_pickup.get_item_data() # This is ItemData
+	if not is_instance_valid(item_data_to_give_player):
+		printerr("ServerPickup: Item node '", item_unique_id_to_pickup, "' has invalid ItemData for peer ", requesting_peer_id)
+		# TODO: RPC failure to client
 		return
 
-	var actual_item_data_instance = item_node_to_pickup.get_item_data() # Calls getter for _local_item_data_instance
-	if not is_instance_valid(actual_item_data_instance):
-		printerr("ServerPickup: Item node '", item_unique_id_to_pickup, "' has NO VALID _local_item_data_instance! (Value from get_item_data():", actual_item_data_instance, ")")
-		# This means _reconstruct_local_item_data failed or wasn't called yet on server for this item.
-		return
+	# --- SERVER-SIDE AUTHORITATIVE "Add to Inventory" ---
+	# Create a fresh instance for the server's inventory
+	var item_instance_for_server_inv = item_data_to_give_player.duplicate()
+	# Quantity is already set correctly from the dropped item's data
 
-	# --- Check ownership for personal items ---
-	if item_node_to_pickup.drop_mode == DroppedItem.DropMode.PERSONAL and \
-	   item_node_to_pickup.owner_peer_id != 0 and \
-	   item_node_to_pickup.owner_peer_id != requesting_peer_id:
-		print("ServerPickup: Player [", requesting_peer_id, "] tried to pick up personal item of player [", item_node_to_pickup.owner_peer_id, "]")
-		# Optionally, send an RPC back to the client: "pickup_denied_not_owner"
-		return # Deny pickup
-	# -----------------------------------------
-
-	var data_to_add_to_inventory = item_node_to_pickup.get_item_data()
-
-	# --- Server-Side "Add to Inventory" (Placeholder Logic) ---
-	# This part needs to represent the server updating its authoritative state.
-	# For now, we assume success and then tell the client.
-	var server_add_successful = true # Assume server can always add it for now
-
-	if server_add_successful:
-		# (Example using temp_inventory_items on the server's Player node for player 'requesting_peer_id')
-		# target_player_node_on_server.temp_inventory_items.append({"item_id": data_to_add_to_inventory.item_id, "quantity": data_to_add_to_inventory.quantity})
-		# target_player_node_on_server.notify_property_list_changed()
-		print("  -> Server: Item added to peer [", requesting_peer_id, "]'s authoritative data.")
-
-		var item_identifier_for_client = data_to_add_to_inventory.resource_path
-		if item_identifier_for_client.is_empty():
-			item_identifier_for_client = data_to_add_to_inventory.item_id
-		var quantity_for_client = data_to_add_to_inventory.quantity
-
-		# --- DIFFERENTIATE SERVER/HOST ACTION ---
-		if requesting_peer_id == multiplayer.get_unique_id(): # Server (host) is picking up for itself
-			print("  -> Server (Host) picking up for self. Calling client_add_item_to_inventory directly.")
-			# Call the method directly on its own instance.
-			# 'self' here refers to the Player node instance that received the original RPC
-			# (server_request_pickup_item_by_id). If the host itself sent that RPC,
-			# then 'self' IS the host's player.
-			# However, this function is an RPC handler. The 'self' here isn't necessarily
-			# target_player_node_on_server if a client called this server_request... RPC.
-			#
-			# The 'target_player_node_on_server' IS the correct instance (node "1" for host).
-			if target_player_node_on_server.is_multiplayer_authority(): # Should be true for host's own node
-				target_player_node_on_server.client_add_item_to_inventory(item_identifier_for_client, quantity_for_client)
-			else:
-				# This case is strange, means host doesn't have authority over its own player node "1"
-				printerr("  -> Server (Host) picking up, but target_player_node_on_server (node '1') reports no authority!")
-		else: # Server processing pickup for a REMOTE client
-			print("  -> Server: Sending RPC client_add_item_to_inventory to remote PlayerNode '", target_player_node_on_server.name, "'")
-			target_player_node_on_server.rpc("client_add_item_to_inventory", item_identifier_for_client, quantity_for_client)
-		# -----------------------------------------
-
-		item_node_to_pickup.queue_free()
-	else:
-		print("ServerPickup: Server-side inventory full for player [", requesting_peer_id, "].")
-		# TODO: Send RPC back to client: "pickup_failed_inventory_full"
-
-
-@rpc("any_peer", "call_local", "reliable")
-func client_add_item_to_inventory(item_identifier: String, quantity: int):
-	if not is_multiplayer_authority(): return
-
-	print("Player [", name, "] (Client Only): Received command to add item to local inventory. ID:", item_identifier, "Qty:", quantity)
-
-	var item_base_res: ItemData = null
-	if item_identifier.begins_with("res://"):
-		item_base_res = load(item_identifier)
-	elif ItemDatabase:
-		item_base_res = ItemDatabase.get_item_base(item_identifier)
-
-	if item_base_res is ItemData:
-		var item_instance_to_add = item_base_res.duplicate()
-		item_instance_to_add.quantity = quantity
+	if ServerInventoryManager.add_item_to_player_inventory(requesting_peer_id, item_instance_for_server_inv):
+		print("  -> Server: Item '", item_data_to_give_player.item_id, "' added to ServerInventoryManager for peer [", requesting_peer_id, "]")
+		# ServerInventoryManager.add_item_to_player_inventory now handles calling _notify_client_of_slot_update,
+		# which sends the client_receive_slot_update RPC to the client's Inventory.gd.
+		# This makes the client's inventory UI update authoritatively.
 		
-		var success = Inventory.add_item(item_instance_to_add) # Add to local Inventory singleton
-		if success:
-			print("  -> Item successfully added to local client inventory.")
-			# TODO: Play pickup sound/UI feedback
-		else:
-			print("  -> Failed to add item to local client inventory (Inventory full?). This indicates a desync with server state.")
-			# This case is problematic - server thought it could be added.
-			# Might need server to handle "inventory full" responses.
+		item_node_to_pickup.queue_free() # Remove item from world
 	else:
-		printerr("Player [", name, "] (Client): Could not reconstruct item from identifier '", item_identifier, "' for local inventory.")
+		print("  -> ServerPickup: ServerInventoryManager reported inventory full for player [", requesting_peer_id, "]. Item '", item_data_to_give_player.item_id, "' not picked up.")
+		# TODO: Send RPC back to client: "pickup_failed_inventory_full"
+		# For now, item remains on ground if server inventory is full.
 
 
-@rpc("any_peer", "call_local", "reliable")
+@rpc("call_remote", "authority", "reliable")
 func client_receive_gathered_items(item_id_yielded: String, quantity_yielded: int) -> void:
 	if not is_multiplayer_authority():
 		print("Player NODE [", name, "] on PEER [", multiplayer.get_unique_id(), "] received client_receive_gathered_items BUT IS NOT AUTHORITY. Ignoring.")
@@ -564,12 +508,29 @@ func client_receive_gathered_items(item_id_yielded: String, quantity_yielded: in
 	if item_base_res is ItemData:
 		var item_instance_to_add = item_base_res.duplicate()
 		item_instance_to_add.quantity = quantity_yielded
-		var success = Inventory.add_item(item_instance_to_add)
-		if not success:
-			print("  -> Inventory full, cannot add gathered item. (Client ", name, ")")
-			# TODO: Client-side feedback for "inventory full" from server instruction
 	else:
 		printerr("  -> Could not find item base for '", item_id_yielded, "' in ItemDatabase. (Client ", name, ")")
+
+
+@rpc("call_local", "authority", "reliable")
+func client_crafting_result(was_successful: bool, crafted_item_id: String, message: String):
+	print("Player [", name, "] (Client Authority) Crafting Result: ", was_successful, " Item: ", crafted_item_id, " Msg: ", message)
+	print("  -> Emitting 'crafting_attempt_completed' signal...")
+	emit_signal("crafting_attempt_completed", was_successful, crafted_item_id, message)
+
+	if was_successful:
+		print("  -> Client: Crafting was successful on server. UI should update based on Inventory signals.")
+		# If CraftingMenu is open, it listens to Inventory signals and should refresh its displays.
+		if is_instance_valid(hud) and hud.is_crafting_menu_open():
+			if is_instance_valid(hud.crafting_menu_instance) and hud.crafting_menu_instance.has_method("_refresh_all_recipe_entry_counts"):
+				hud.crafting_menu_instance._refresh_all_recipe_entry_counts()
+			if is_instance_valid(hud.crafting_menu_instance) and hud.crafting_menu_instance.has_method("_on_recipe_entry_selected"):
+				if is_instance_valid(hud.crafting_menu_instance.currently_selected_recipe_item):
+					hud.crafting_menu_instance._on_recipe_entry_selected(hud.crafting_menu_instance.currently_selected_recipe_item)
+		# TODO: Play crafting success sound
+	else:
+		print("  -> Client: Crafting failed on server. Reason: ", message)
+		# TODO: Show error message to player on UI (e.g., "Missing Ingredients", "Inventory Full")
 
 func handle_world_drop(item_data_to_drop: ItemData, p_drop_mode: DroppedItem.DropMode = DroppedItem.DropMode.GLOBAL, p_owner_peer_id: int = 0):
 	if not is_multiplayer_authority():
@@ -988,6 +949,78 @@ func try_use_selected_item():
 				print("Selected item type cannot be 'used' directly:", ItemData.ItemType.keys()[selected_item.item_type])
 	else:
 		print("No item selected to use.")
+
+func process_server_craft_attempt(item_id_to_craft: String):
+	if not multiplayer.is_server():
+		printerr("CRITICAL: process_server_craft_attempt called on client instance for ", name)
+		return
+
+	# 'self.name' should be the string representation of the peer_id for this player instance
+	var owner_peer_id = self.name.to_int() # This is the peer_id of the player this server node instance represents
+
+	print("Player ", name, " (Server Instance, Owner Peer: ", owner_peer_id, ") processing server craft attempt for: ", item_id_to_craft)
+
+	var craftable_item_data = ItemDatabase.get_item_base(item_id_to_craft)
+	if not is_instance_valid(craftable_item_data) or craftable_item_data.crafting_ingredients.is_empty():
+		printerr("  -> Server: Invalid item_id '", item_id_to_craft, "' or item is not craftable.")
+		client_crafting_result.rpc(false, item_id_to_craft, "Invalid recipe.") # RPC back to the client who owns this player instance
+		return
+
+	# --- TODO: Add Crafting Station Check (e.g., Forge) ---
+	# var required_station = craftable_item_data.get("required_station_type", "")
+	# if not required_station.is_empty():
+	#     if not is_near_crafting_station(required_station, owner_peer_id): # Pass owner_peer_id if needed
+	#         print("  -> Server: Player not near required station '", required_station, "' for '", item_id_to_craft, "'")
+	#         client_crafting_result.rpc(false, item_id_to_craft, "Required station not nearby.")
+	#         return
+	# ---------------------------------------------------------
+
+	var has_all_ingredients = true
+	var ingredients_to_consume_details: Array[Dictionary] = [] # Store details for actual consumption
+
+	for ingredient_dict in craftable_item_data.crafting_ingredients:
+		var req_item_id = ingredient_dict.get("item_id")
+		var req_qty = ingredient_dict.get("quantity")
+		
+		# Use ServerInventoryManager to check this specific player's authoritative inventory
+		var player_has_qty = ServerInventoryManager.get_player_item_quantity_by_id(owner_peer_id, req_item_id)
+		
+		if player_has_qty < req_qty:
+			has_all_ingredients = false
+			print("  -> Server: Player ", name, " (Peer:", owner_peer_id, ") missing ingredient ", req_item_id, " (Needs:", req_qty, " Has:", player_has_qty, ")")
+			break
+		ingredients_to_consume_details.append({"item_id": req_item_id, "quantity": req_qty})
+		
+	if not has_all_ingredients:
+		printerr("  -> Server: Crafting failed for ", name, " (Peer:", owner_peer_id, ") - Missing ingredients for '", item_id_to_craft, "'.")
+		client_crafting_result.rpc(false, item_id_to_craft, "Missing ingredients.")
+		return
+
+	# 2. Server-side: Consume Ingredients using ServerInventoryManager
+	print("  -> Server: Consuming ingredients for ", name, " (Peer:", owner_peer_id, ") to craft '", item_id_to_craft, "'")
+	for ingredient_to_consume in ingredients_to_consume_details:
+		var item_id_con = ingredient_to_consume.get("item_id")
+		var qty_con = ingredient_to_consume.get("quantity")
+		if not ServerInventoryManager.remove_item_from_player_inventory_by_id_and_quantity(owner_peer_id, item_id_con, qty_con):
+			printerr("  -> SERVER CRITICAL ERROR: Failed to consume ", item_id_con, " for player ", name, " (Peer:", owner_peer_id, ") even after check! Inventory desync or SIM logic error.")
+			# Attempt to rollback or handle inconsistency. For now, notify client of generic error.
+			client_crafting_result.rpc(false, item_id_to_craft, "Internal server error during ingredient consumption.")
+			return 
+
+	# 3. Server-side: Add Crafted Item using ServerInventoryManager
+	print("  -> Server: Adding crafted item '", item_id_to_craft, "' to player ", name, " (Peer:", owner_peer_id, ")'s inventory.")
+	var crafted_item_instance_server = craftable_item_data.duplicate() # Server gets its own fresh instance
+	crafted_item_instance_server.quantity = 1 # Assuming recipes produce 1 for now
+	
+	if not ServerInventoryManager.add_item_to_player_inventory(owner_peer_id, crafted_item_instance_server):
+		printerr("  -> SERVER CRITICAL ERROR: Inventory full for player ", name, " (Peer:", owner_peer_id, ") after consuming ingredients for '", item_id_to_craft, "'. Item lost on server!")
+		client_crafting_result.rpc(false, item_id_to_craft, "Inventory full on server after crafting.")
+		# TODO: Ideally, drop the item on the ground near the player on the server.
+		return
+
+	# 4. Notify the original client of success
+	print("  -> Server: Crafting successful for player ", name, " (Peer:", owner_peer_id, "). Notifying client.")
+	client_crafting_result.rpc(true, item_id_to_craft, "Crafted successfully!") # RPC to the client who owns this player instance
 
 func _try_gather_from_node(node_to_gather_from: ResourceNode) -> void:
 	if not is_multiplayer_authority(): return
