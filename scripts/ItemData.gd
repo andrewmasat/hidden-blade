@@ -36,6 +36,7 @@ enum ItemType {
 ## Array of dictionaries, e.g., [{"item_id": "wood_log", "quantity": 3}, {"item_id": "stone_chunk", "quantity": 1}]
 ## If this array is empty, the item is not craftable via this recipe system.
 @export var crafting_ingredients: Array[Dictionary] = []
+@export var required_station_type: String = "" # Examples: "FORGE", "ANVIL", "COOKING_FIRE". Empty means no station needed.
 @export var crafting_time_seconds: float = 1.0
 
 # --- Helper Functions ---

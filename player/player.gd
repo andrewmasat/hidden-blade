@@ -10,6 +10,7 @@ signal local_player_is_ready(player_instance)
 signal health_changed(current_health: float, max_health: float)
 signal dash_charges_changed(current_charges: int, max_charges: int)
 signal crafting_attempt_completed(was_successful: bool, crafted_item_id: String, message: String)
+signal nearby_stations_changed(stations_array: Array)
 
 enum State { IDLE_RUN, DASH, ATTACK, TRANSITIONING }
 
@@ -47,6 +48,7 @@ var player_name: String = "Ninja" : set = set_player_name
 var current_state: State = State.IDLE_RUN
 var last_direction: Vector2 = Vector2.DOWN
 var equipped_item_data: ItemData = null
+var nearby_crafting_stations: Array[Node2D] = []
 var nearby_items: Array[DroppedItem] = []
 var nearby_resource_nodes: Array[ResourceNode] = []
 var _currently_targeted_resource_node: ResourceNode = null
@@ -512,25 +514,22 @@ func client_receive_gathered_items(item_id_yielded: String, quantity_yielded: in
 		printerr("  -> Could not find item base for '", item_id_yielded, "' in ItemDatabase. (Client ", name, ")")
 
 
-@rpc("call_local", "authority", "reliable")
+@rpc("any_peer", "call_local", "reliable")
 func client_crafting_result(was_successful: bool, crafted_item_id: String, message: String):
+	if not is_multiplayer_authority():
+		# This should ideally not happen if the server's rpc() call is correctly routed
+		# to the authoritative client for this specific player node.
+		print("Player [", name, "] on PEER [", multiplayer.get_unique_id(), "] received client_crafting_result BUT IS NOT MULTIPLAYER AUTHORITY. Ignoring.")
+		return
+
 	print("Player [", name, "] (Client Authority) Crafting Result: ", was_successful, " Item: ", crafted_item_id, " Msg: ", message)
 	print("  -> Emitting 'crafting_attempt_completed' signal...")
 	emit_signal("crafting_attempt_completed", was_successful, crafted_item_id, message)
 
 	if was_successful:
-		print("  -> Client: Crafting was successful on server. UI should update based on Inventory signals.")
-		# If CraftingMenu is open, it listens to Inventory signals and should refresh its displays.
-		if is_instance_valid(hud) and hud.is_crafting_menu_open():
-			if is_instance_valid(hud.crafting_menu_instance) and hud.crafting_menu_instance.has_method("_refresh_all_recipe_entry_counts"):
-				hud.crafting_menu_instance._refresh_all_recipe_entry_counts()
-			if is_instance_valid(hud.crafting_menu_instance) and hud.crafting_menu_instance.has_method("_on_recipe_entry_selected"):
-				if is_instance_valid(hud.crafting_menu_instance.currently_selected_recipe_item):
-					hud.crafting_menu_instance._on_recipe_entry_selected(hud.crafting_menu_instance.currently_selected_recipe_item)
-		# TODO: Play crafting success sound
+		print("  -> Client: Crafting was successful on server. Inventory UI should update via its signals.")
 	else:
 		print("  -> Client: Crafting failed on server. Reason: ", message)
-		# TODO: Show error message to player on UI (e.g., "Missing Ingredients", "Inventory Full")
 
 func handle_world_drop(item_data_to_drop: ItemData, p_drop_mode: DroppedItem.DropMode = DroppedItem.DropMode.GLOBAL, p_owner_peer_id: int = 0):
 	if not is_multiplayer_authority():
@@ -724,6 +723,19 @@ func end_scene_transition() -> void:
 # Simplify this check if flag removed
 func is_currently_transitioning() -> bool:
 	return current_state == State.TRANSITIONING
+
+func is_near_crafting_station(type_needed: String) -> bool:
+	if type_needed.is_empty(): # No station needed for this recipe
+		return true 
+
+	for station_node in nearby_crafting_stations:
+		if is_instance_valid(station_node) and station_node.has_method("get"):
+			# Assuming the station script (e.g., Forge.gd) has an exported 'station_type' var
+			var actual_station_type = station_node.get("station_type") # Use .get() for safety
+			if actual_station_type is String and actual_station_type == type_needed:
+				return true # Found a nearby station of the required type
+	
+	return false # No station of the required type found nearby
 
 # Central function called whenever state or direction might change animation
 func _update_hand_and_weapon_animation():
@@ -966,14 +978,15 @@ func process_server_craft_attempt(item_id_to_craft: String):
 		client_crafting_result.rpc(false, item_id_to_craft, "Invalid recipe.") # RPC back to the client who owns this player instance
 		return
 
-	# --- TODO: Add Crafting Station Check (e.g., Forge) ---
-	# var required_station = craftable_item_data.get("required_station_type", "")
-	# if not required_station.is_empty():
-	#     if not is_near_crafting_station(required_station, owner_peer_id): # Pass owner_peer_id if needed
-	#         print("  -> Server: Player not near required station '", required_station, "' for '", item_id_to_craft, "'")
-	#         client_crafting_result.rpc(false, item_id_to_craft, "Required station not nearby.")
-	#         return
-	# ---------------------------------------------------------
+	var required_station_server = craftable_item_data.get("required_station_type") # Use .get()
+	if required_station_server is String and not required_station_server.is_empty():
+		# 'self' here is the server's instance of the player node.
+		# It needs its own 'is_near_crafting_station' check based on its server-side knowledge
+		# of nearby_crafting_stations (which should be populated correctly by its Area2D).
+		if not self.is_near_crafting_station(required_station_server):
+			print("  -> Server: Player ", name, " (Peer:", owner_peer_id, ") not near required station '", required_station_server, "' for '", item_id_to_craft, "'.")
+			client_crafting_result.rpc(false, item_id_to_craft, "Required station: " + required_station_server + " not nearby.")
+			return
 
 	var has_all_ingredients = true
 	var ingredients_to_consume_details: Array[Dictionary] = [] # Store details for actual consumption
@@ -1205,9 +1218,14 @@ func _on_pickup_area_entered(area: Area2D) -> void:
 		if is_instance_valid(resource_node) and not resource_node in nearby_resource_nodes:
 			if not resource_node.is_depleted: # Only add if not initially depleted
 				nearby_resource_nodes.append(resource_node)
+	elif area.is_in_group("crafting_station_area"):
+		var station_node = area.get_owner() 
+		if is_instance_valid(station_node) and not station_node in nearby_crafting_stations:
+			nearby_crafting_stations.append(station_node)
+			print("Player [", name, "] entered vicinity of crafting station: ", station_node.name)
+			emit_signal("nearby_stations_changed", nearby_crafting_stations) # Emit signal
 	elif area.is_in_group("player_pickup_area"):
 		pass
-	# ... (rest of your existing logic for other area types) ...
 	else:
 		print("Player pickup area entered unknown/unhandled area type:", area.name, " (Owner: ", area.get_owner().name if area.get_owner() else "None", ")")
 
@@ -1228,6 +1246,12 @@ func _on_pickup_area_exited(area):
 				if is_instance_valid(hud) and hud.has_method("hide_generic_interaction_prompt"):
 					hud.hide_generic_interaction_prompt()
 				_currently_targeted_resource_node = null
+	elif area.is_in_group("crafting_station_area"):
+		var station_node = area.get_owner()
+		if station_node in nearby_crafting_stations:
+			nearby_crafting_stations.erase(station_node)
+			print("Player [", name, "] exited vicinity of crafting station: ", station_node.name)
+			emit_signal("nearby_stations_changed", nearby_crafting_stations) # Emit signal
 
 func _on_animation_finished(_anim_name: String):
 	# Keep existing attack animation logic

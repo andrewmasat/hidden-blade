@@ -242,3 +242,11 @@ func assign_player_and_connect_signals(p_player_node: Player):
 	else:
 		if not is_instance_valid(p_player_node): printerr("HUD Error: PlayerNode is invalid for crafting signal connection.")
 		if not is_instance_valid(crafting_menu_instance): printerr("HUD Error: CraftingMenuInstance is invalid for crafting signal connection.")
+
+	if is_instance_valid(p_player_node) and p_player_node.has_signal("nearby_stations_changed") and is_instance_valid(crafting_menu_instance) and crafting_menu_instance.has_method("_on_player_nearby_stations_changed"):
+		if not p_player_node.is_connected("nearby_stations_changed", Callable(crafting_menu_instance, "_on_player_nearby_stations_changed")):
+			var err = p_player_node.nearby_stations_changed.connect(crafting_menu_instance._on_player_nearby_stations_changed)
+			if err == OK:
+				print("HUD: Connected Player.nearby_stations_changed to CraftingMenu._on_player_nearby_stations_changed")
+			else:
+				printerr("HUD: FAILED to connect nearby_stations_changed. Error: ", err)

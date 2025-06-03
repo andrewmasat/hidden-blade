@@ -227,21 +227,36 @@ func _notify_client_of_cursor_item_update(peer_id_to_notify: int, cursor_item_da
 		printerr("SIM: No multiplayer peer, cannot send RPC for cursor update.")
 		return
 
-	print("SIM: Notifying client ", peer_id_to_notify, " of cursor item update.")
+	# Check if the target peer is currently connected
+	var is_target_connected = false
+	if peer_id_to_notify == multiplayer.get_unique_id(): # Target is self (server/host)
+		is_target_connected = true 
+	else:
+		var connected_peers = multiplayer.get_peers() # Gets an array of connected peer IDs
+		if connected_peers.has(peer_id_to_notify):
+			is_target_connected = true
 
-	var item_path = ""
-	var item_id = ""
-	var item_qty = 0
-	if is_instance_valid(cursor_item_data):
-		item_path = cursor_item_data.resource_path
-		item_id = cursor_item_data.item_id
-		item_qty = cursor_item_data.quantity
-	
-	var inventory_node_path = "/root/Inventory" # Client's Inventory.gd
-	if peer_id_to_notify == multiplayer.get_unique_id() or multiplayer.get_peer_state(peer_id_to_notify) == MultiplayerPeer.CONNECTION_CONNECTED:
-		var local_inv_ref = get_node_or_null(inventory_node_path)
+	if is_target_connected:
+		print("SIM: Notifying client ", peer_id_to_notify, " of cursor item update.")
+
+		var item_path = ""
+		var item_id = ""
+		var item_qty = 0
+		if is_instance_valid(cursor_item_data):
+			item_path = cursor_item_data.resource_path
+			item_id = cursor_item_data.item_id
+			item_qty = cursor_item_data.quantity
+		
+		var inventory_node_path = "/root/Inventory" # Client's Inventory.gd
+		var local_inv_ref = get_node_or_null(inventory_node_path) # Server's local ref to its own Inventory Autoload
 		if is_instance_valid(local_inv_ref):
-			local_inv_ref.rpc_id(peer_id_to_notify, "client_receive_cursor_item_update", item_path, item_id, item_qty)
+			local_inv_ref.rpc_id(
+				peer_id_to_notify, 
+				"client_receive_cursor_item_update", 
+				item_path, 
+				item_id, 
+				item_qty
+			)
 		else:
 			printerr("SIM: Could not find local /root/Inventory to initiate cursor RPC.")
 	else:
@@ -366,29 +381,36 @@ func _notify_client_of_slot_update(peer_id_to_notify: int, area: Inventory.Inven
 		printerr("ServerInventoryManager: No multiplayer peer configured for MultiplayerAPI, cannot send RPC for slot update.")
 		return
 
-	print("ServerInventoryManager: Notifying client ", peer_id_to_notify, " of update to ", Inventory.InventoryArea.keys()[area], "[", slot_index, "]")
+	# Check if the target peer is currently connected
+	var is_target_connected = false
+	if peer_id_to_notify == multiplayer.get_unique_id(): # Target is self (server/host)
+		is_target_connected = true 
+	else:
+		var connected_peers = multiplayer.get_peers() # Gets an array of connected peer IDs
+		if connected_peers.has(peer_id_to_notify):
+			is_target_connected = true
+			
+	if is_target_connected:
+		print("ServerInventoryManager: Notifying client ", peer_id_to_notify, " of update to ", Inventory.InventoryArea.keys()[area], "[", slot_index, "]")
 
-	var item_data_path_to_send = ""
-	var item_id_to_send = ""
-	var quantity_to_send = 0
+		var item_data_path_to_send = ""
+		var item_id_to_send = ""
+		var quantity_to_send = 0
 
-	if item_data is ItemData:
-		item_data_path_to_send = item_data.resource_path
-		item_id_to_send = item_data.item_id
-		quantity_to_send = item_data.quantity
-		if item_data_path_to_send.is_empty() and not item_id_to_send.is_empty():
-			print("ServerInventoryManager: Item '", item_id_to_send, "' has no resource_path. Client will reconstruct from ID.")
+		if item_data is ItemData:
+			item_data_path_to_send = item_data.resource_path
+			item_id_to_send = item_data.item_id
+			quantity_to_send = item_data.quantity
+			if item_data_path_to_send.is_empty() and not item_id_to_send.is_empty():
+				print("ServerInventoryManager: Item '", item_id_to_send, "' has no resource_path. Client will reconstruct from ID.")
 
-	var target_node_path_on_client = "/root/Inventory" # Path to Inventory.gd on the client
-
-	if peer_id_to_notify == multiplayer.get_unique_id() or multiplayer.get_peer_state(peer_id_to_notify) == MultiplayerPeer.CONNECTION_CONNECTED:
-		# Get the server's local reference to its own /root/Inventory node to initiate the RPC.
+		var target_node_path_on_client = "/root/Inventory"
 		var local_inventory_node_ref = get_node_or_null(target_node_path_on_client) 
 		if is_instance_valid(local_inventory_node_ref):
 			local_inventory_node_ref.rpc_id(
 				peer_id_to_notify, 
 				"client_receive_slot_update", 
-				area, # area_enum_val (int)
+				area, 
 				slot_index, 
 				item_data_path_to_send, 
 				item_id_to_send, 
@@ -397,4 +419,4 @@ func _notify_client_of_slot_update(peer_id_to_notify: int, area: Inventory.Inven
 		else:
 			printerr("ServerInventoryManager: Could not find local /root/Inventory node to initiate RPC. This should not happen for an autoload.")
 	else:
-		print("ServerInventoryManager: Peer ", peer_id_to_notify, " not connected or invalid state for RPC. State: ", multiplayer.get_peer_state(peer_id_to_notify))
+		print("ServerInventoryManager: Peer ", peer_id_to_notify, " not connected or invalid state for RPC. Cannot send slot update.")

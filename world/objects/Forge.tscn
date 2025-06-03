@@ -4,7 +4,7 @@
 [ext_resource type="Texture2D" uid="uid://cg7y524cf5nwo" path="res://assets/Backgrounds/Tilesets/TilesetHouse.png" id="1_fqm55"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_c7p7d"]
-size = Vector2(34, 22)
+size = Vector2(48, 26)
 
 [sub_resource type="CapsuleShape2D" id="CapsuleShape2D_c7p7d"]
 radius = 7.0
@@ -18,12 +18,12 @@ offset = Vector2(0, -10)
 region_enabled = true
 region_rect = Rect2(465, 209, 30, 29)
 
-[node name="InteractionArea" type="Area2D" parent="." groups=["crafting_station_interaction_zone"]]
-collision_layer = 4
-collision_mask = 4
+[node name="InteractionArea" type="Area2D" parent="." groups=["crafting_station_area"]]
+collision_layer = 256
+collision_mask = 2
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="InteractionArea"]
-position = Vector2(0, 2)
+position = Vector2(0, 4)
 shape = SubResource("RectangleShape2D_c7p7d")
 
 [node name="StaticBody2D" type="StaticBody2D" parent="."]

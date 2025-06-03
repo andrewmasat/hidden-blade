@@ -8,6 +8,7 @@ const RecipeEntryScene = preload("res://ui/crafting/RecipeEntry.tscn") # Adjust 
 @onready var crafting_progress_bar = $PanelContainer/MarginContainer/VBoxContainer/HBoxContainer/VBoxContainer/CraftingProgressBar
 @onready var crafting_status_label = $PanelContainer/MarginContainer/VBoxContainer/HBoxContainer/VBoxContainer/CraftingStatusLabel
 @onready var craft_button = $PanelContainer/MarginContainer/VBoxContainer/HBoxContainer/VBoxContainer/CraftButton
+@onready var hud = null
 
 var all_craftable_items: Array[ItemData] = []
 var currently_selected_recipe_item: ItemData = null
@@ -21,6 +22,11 @@ var _current_craft_duration: float = 0.0
 func _ready():
 	Inventory.inventory_changed.connect(_on_player_inventory_changed)
 	Inventory.main_inventory_changed.connect(_on_player_inventory_changed)
+
+	if get_tree() and get_tree().get_first_node_in_group("HUD"):
+		hud = get_tree().get_first_node_in_group("HUD")
+	else:
+		printerr("CraftingMenu: HUD node not found in group 'HUD'. Temporary messages for non-active crafts might not show.")
 
 	craft_button.pressed.connect(_on_craft_button_pressed)
 	craft_button.disabled = true
@@ -96,36 +102,58 @@ func _populate_recipe_list():
 		recipe_entry.pressed.connect(_on_recipe_entry_selected.bind(item_data))
 
 
-func handle_server_crafting_result(was_successful: bool, p_crafted_item_id: String, _message: String):
-	print("CraftingMenu [", name, "] handle_server_crafting_result TRIGGERED. Success: ", was_successful, " Item: ", p_crafted_item_id)
+func handle_server_crafting_result(was_successful: bool, p_crafted_item_id: String, message_from_server: String):
+	print("CraftingMenu [", name, "] handle_server_crafting_result TRIGGERED. Success: ", was_successful, " Item: ", p_crafted_item_id, " Server Msg: ", message_from_server)
+
+	# Ensure item_base_data is fetched and valid before trying to get its display name
+	var item_base_data = ItemDatabase.get_item_base(p_crafted_item_id)
+	var item_display_name_str = p_crafted_item_id # Fallback to ID if item_base_data is invalid
+
+	if is_instance_valid(item_base_data):
+		item_display_name_str = _get_item_display_name(item_base_data) # This should always return a string
+	else:
+		print("CraftingMenu: Could not find ItemData for '", p_crafted_item_id, "' to get display name for result message.")
+
+	# Ensure message_from_server is treated as a string for concatenation
+	var server_message_str = str(message_from_server) # Explicitly cast, though it should be string
+
 	if _is_currently_crafting and p_crafted_item_id == _current_craft_item_id:
-		# This was the craft we were waiting for
 		if was_successful:
-			# Server already handled inventory changes and sent RPCs to client Inventory.gd
-			# Client Inventory.gd emitted signals, so UI should update.
-			# TODO: Play crafting success sound
+			if is_instance_valid(crafting_status_label):
+				crafting_status_label.text = "%s crafted!" % [item_display_name_str] # Using string formatting
+				crafting_status_label.modulate = Color.GREEN
+				crafting_status_label.visible = true
 			print("  -> CraftingMenu: Craft successful on server for ", p_crafted_item_id)
 		else:
-			# TODO: Play crafting failed sound, show specific error message from server to user
-			print("  -> CraftingMenu: Craft FAILED on server for ", p_crafted_item_id, ". Reason: ", _message)
+			if is_instance_valid(crafting_status_label):
+				crafting_status_label.text = "Failed: %s" % [server_message_str] # Using string formatting
+				crafting_status_label.modulate = Color.RED
+				crafting_status_label.visible = true
+			print("  -> CraftingMenu: Craft FAILED on server for ", p_crafted_item_id, ". Reason: ", server_message_str)
 		
-		_reset_crafting_state() # Always reset after server response
-		_refresh_all_recipe_entry_counts() # Refresh counts as inventory has changed
-		_update_craft_button_state() # Update button for current selection
-		
-		# If a recipe was selected, re-display its info as ingredient counts changed
-		if is_instance_valid(currently_selected_recipe_item):
-			_on_recipe_entry_selected(currently_selected_recipe_item)
+		var result_message_timer = get_tree().create_timer(2.0)
+		result_message_timer.timeout.connect(func():
+			if is_instance_valid(self):
+				_reset_crafting_state()
+				_refresh_all_recipe_entry_counts()
+				_update_craft_button_state()
+				if is_instance_valid(currently_selected_recipe_item):
+					_on_recipe_entry_selected(currently_selected_recipe_item)
+		)
 
-	elif not _is_currently_crafting and was_successful:
-		# This might be for an "instant" craft that didn't use the timer,
-		# or a craft result came in after player closed menu / cancelled.
-		print("  -> CraftingMenu: Received craft success for '", p_crafted_item_id,"' but not actively crafting it locally or already reset. Inventory should be updated by server.")
-		_refresh_all_recipe_entry_counts() # Still refresh counts
-		_update_craft_button_state()
-	elif not _is_currently_crafting and not was_successful:
-		print("  -> CraftingMenu: Received craft failure for '", p_crafted_item_id,"' but not actively crafting it locally. Reason: ", _message)
-		# Potentially show a global notification if important.
+	elif not _is_currently_crafting:
+		if was_successful:
+			print("  -> CraftingMenu: Received craft success for '", p_crafted_item_id,"' (not actively crafting). Inv should be updated.")
+			if is_instance_valid(hud) and hud.has_method("show_temporary_message"):
+				hud.show_temporary_message("%s crafted!" % [item_display_name_str], 2.0) # String formatting
+		else:
+			print("  -> CraftingMenu: Received craft failure for '", p_crafted_item_id,"' (not actively crafting). Reason: ", server_message_str)
+			if is_instance_valid(hud) and hud.has_method("show_temporary_message"):
+				hud.show_temporary_message("Craft failed: %s" % [server_message_str], 2.5) # String formatting
+		
+		if visible: # Only refresh if menu is open
+			_refresh_all_recipe_entry_counts()
+			_update_craft_button_state()
 
 
 func _on_recipe_entry_selected(selected_item_data: ItemData):
@@ -173,7 +201,7 @@ func _update_craft_button_state():
 		return
 
 	var can_craft = true
-	# Check if player has all ingredients for currently_selected_recipe_item
+	# Check ingredients (existing logic)
 	for ingredient_dict in currently_selected_recipe_item.crafting_ingredients:
 		var req_item_id = ingredient_dict.get("item_id")
 		var req_qty = ingredient_dict.get("quantity")
@@ -181,10 +209,23 @@ func _update_craft_button_state():
 			can_craft = false
 			break
 	
-	# TODO: Add check for crafting station proximity if needed (e.g., near a forge)
-	# var player = SceneManager.player_node (or however you get player)
-	# if currently_selected_recipe_item.requires_station == "FORGE" and not player.is_near_forge():
-	#     can_craft = false
+	if not can_craft: # If already false due to ingredients, no need to check station
+		craft_button.disabled = true
+		return
+
+	# --- Check for required crafting station (Client-side for UI) ---
+	var required_station = currently_selected_recipe_item.get("required_station_type") # Use .get for safety
+	if required_station is String and not required_station.is_empty():
+		var local_player = SceneManager.player_node # Assuming SceneManager holds local player ref
+		if is_instance_valid(local_player) and local_player.has_method("is_near_crafting_station"):
+			if not local_player.is_near_crafting_station(required_station):
+				can_craft = false
+				# Optional: Update selected_recipe_info_label to say "Requires [STATION_TYPE] nearby"
+				selected_recipe_info_label.text += "\nRequires " + required_station + " nearby." 
+		else:
+			# Player node not found or method missing, assume cannot meet station req for safety
+			can_craft = false 
+			printerr("CraftingMenu: Could not check station proximity (player node or method issue).")
 
 	craft_button.disabled = not can_craft
 
@@ -234,6 +275,13 @@ func _reset_crafting_state():
 	_update_craft_button_state() # Re-evaluate craft button (might be craftable again or not)
 	print("CraftingMenu: Crafting state reset.")
 
+func _on_player_nearby_stations_changed(_stations_array: Array): # We don't strictly need stations_array here
+	if visible: # Only update if the crafting menu is open
+		print("CraftingMenu: Player's nearby stations changed, updating craft button state.")
+		_update_craft_button_state() 
+		# Optional: If a recipe is selected, re-trigger its info display to update station message
+		if is_instance_valid(currently_selected_recipe_item):
+			_on_recipe_entry_selected(currently_selected_recipe_item)
 
 func _on_craft_button_pressed():
 	if _is_currently_crafting: # Don't allow starting a new craft if one is in progress

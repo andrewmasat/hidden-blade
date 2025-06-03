@@ -17,4 +17,6 @@ equipped_texture = ExtResource("1_6g58h")
 damage = 0.0
 world_despawn_duration = 60.0
 crafting_ingredients = Array[Dictionary]([])
+required_station_type = ""
+crafting_time_seconds = 1.0
 metadata/_custom_type_script = "uid://cd5h74w7bgd82"

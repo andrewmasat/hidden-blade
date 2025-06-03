@@ -18,4 +18,6 @@ crafting_ingredients = Array[Dictionary]([{
 "item_id": "resource_ore_ashiron",
 "quantity": 2
 }])
+required_station_type = "FORGE"
+crafting_time_seconds = 1.0
 metadata/_custom_type_script = "uid://cd5h74w7bgd82"
